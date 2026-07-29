@@ -6,3 +6,5 @@ progress.log
 run/
 changes.v2
 logs
+__pycache__/
+*.pyc
