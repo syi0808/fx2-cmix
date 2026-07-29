@@ -60,7 +60,6 @@ ContextManager::ContextManager() : history_(60000000, 0),
     hashes_ind1.resize(0x1000000, 0);
     hashes_ind2.resize(0x1000000, 0);
     hashes_ind3.resize(0x2000000, 0);
-    hashes_ind4.resize(0x100, 0);
     hashes_ind5.resize(0x100, 0);
 }
 
@@ -218,4 +217,3 @@ void ContextManager::UpdateContexts(int bit) {
         mxx=(stream2bR&63)*8 +(b3stream&7);
         
 }
-
