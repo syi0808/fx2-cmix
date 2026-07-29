@@ -50,3 +50,37 @@ The structural candidates improve their target feature cohesion but lose the
 semantic and manual locality already encoded in the current permutation. They
 are rejected before the multi-day cmix body benchmark. The next experiment
 keeps the current article order and measures latent topic mixers independently.
+
+## 2026-07-29 bounded latent-topic pass
+
+The mini corpus contains four 512-article slices at current-order ranks 0,
+40,000, 80,000, and 120,000. Each article retains its title and first 512 text
+bytes. This produces 2,048 articles and 1,303,221 bytes. A shuffled control uses
+the identical articles and shuffle seed 923.
+
+One `-n` compression pass evaluated five independent adaptive top-mixer
+branches before SSE. Topic shifts 9/6/3 represent 512/64/8-article blocks.
+Negative deltas are better.
+
+| Input | Mask 0 bytes | Coarse (1) delta | Mid (2) delta | Fine (4) delta | All (7) delta |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Current order | 131,900.932 | -0.181 | -7.910 | -6.945 | -16.729 |
+| Shuffled | 138,198.239 | -13.601 | -26.187 | -11.621 | -41.470 |
+
+The actual mask-0 compressed streams were 131,784 bytes in current order and
+137,992 bytes shuffled. Thus current ordering saves 6,208 bytes (4.50%) on this
+sample, while all latent mixers improve the ordered pre-SSE estimate by only
+16.729 bytes (0.0127%). The larger topic-mixer gain after shuffling shows that
+the small benefit is compatible with arbitrary block-specific adaptation, not
+evidence that the index prefixes recover useful topics.
+
+An actual mask-7 smoke compression reduced a 48,617-byte corpus from 7,937 to
+7,923 bytes, and its decompressed SHA-256 matched the source. This validates
+the counter and codec symmetry but not full-corpus profitability.
+
+Conclusion: the existing semantic/manual ordering is strongly useful, but
+adding index-derived topic mixers is not justified by this bounded test. Its
+measured gain is too small to cover extra code and memory confidently. The
+result is directional rather than a proof because pages are truncated, topic
+blocks are scaled down, preprocessing is disabled, and shadow loss excludes
+SSE.
