@@ -67,3 +67,27 @@ python3 experiments/article_order/record_result.py \
 
 Always compare `total_submission_bytes`, not only the compressed body. A full
 candidate is valid only when `restored_sha256_matches` is true.
+
+## 4. Enable latent topic mixers
+
+`LATENT_TOPIC_CONTEXT` is a bit mask for dedicated article-position mixers:
+
+- `1`: coarse, 4096 articles
+- `2`: mid, 512 articles
+- `4`: fine, 64 articles
+
+For example, build all three resolutions with:
+
+```bash
+make CFLAGS_DEFINES="-DSEED=923 -DUPDATE_LIMIT=3000 -DLATENT_TOPIC_CONTEXT=7"
+```
+
+For the PGO/self-extracting build, use:
+
+```bash
+LATENT_TOPIC_CONTEXT=7 ./build_and_construct_comp.sh
+```
+
+The article counter is updated from decoded `</page>` boundaries in FXCM, so
+compression and decompression derive the same context without storing topic
+metadata. Use `LATENT_TOPIC_CONTEXT=0` for the reorder-only ablation.

@@ -53,6 +53,9 @@ class Predictor {
   void AddMatch();
   void AddDoubleIndirect();
   void AddMixers();
+#if LATENT_TOPIC_CONTEXT
+  void UpdateLatentTopics();
+#endif
 
   llvm::SmallVector<Indirect<Nonstationary>, 30-7> indirect_ns_models_; // non-stationary
   llvm::SmallVector<Indirect<RunMap>, 1> indirect_r_models_; // run map
@@ -63,7 +66,9 @@ class Predictor {
   size_t auxiliary_size_ = 2; // 0 -> fxcm, 1 -> byte_mixer
   SSE sse_;
   llvm::SmallVector<MixerInput,2> layers_;
-  llvm::SmallVector<Mixer, 23> mixer_0_;
+  llvm::SmallVector<Mixer, 23 + ((LATENT_TOPIC_CONTEXT & 1) != 0)
+      + ((LATENT_TOPIC_CONTEXT & 2) != 0)
+      + ((LATENT_TOPIC_CONTEXT & 4) != 0)> mixer_0_;
   llvm::SmallVector<Mixer, 1> mixer_1_;
   std::vector<unsigned int> auxiliary_;
   ContextManager manager_;
@@ -71,8 +76,12 @@ class Predictor {
   std::optional<PPMD::PPMD> byte_model_;
   std::optional<ByteMixer> byte_mixer_;
   std::vector<bool> vocab_;
-   FXCM fxcm_model_;
+  FXCM fxcm_model_;
+#if LATENT_TOPIC_CONTEXT
+  unsigned long long coarse_topic_ = 0;
+  unsigned long long mid_topic_ = 0;
+  unsigned long long fine_topic_ = 0;
+#endif
 };
 
 #endif
-

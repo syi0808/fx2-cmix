@@ -123,6 +123,14 @@ void Predictor::AddDoubleIndirect() {
 unsigned int Discretize(float p) {
   return 1 + 4094 * p;
 }
+#if LATENT_TOPIC_CONTEXT
+void Predictor::UpdateLatentTopics() {
+  const uint32_t article_index = fxcm_model_.ArticleIndex();
+  coarse_topic_ = article_index >> 12;
+  mid_topic_ = article_index >> 9;
+  fine_topic_ = article_index >> 6;
+}
+#endif
 void Predictor::AddMixers() {
   unsigned int vocab_size = 0;
   for (unsigned int i = 0; i < vocab_.size(); ++i) {
@@ -163,6 +171,15 @@ void Predictor::AddMixers() {
   AddMixer(0, manager_.mx16, 0.005);
   AddMixer(0, manager_.mx14, 0.005);
   AddMixer(0, manager_.mx15, 0.005);
+#if LATENT_TOPIC_CONTEXT & 1
+  AddMixer(0, coarse_topic_, 0.0005);
+#endif
+#if LATENT_TOPIC_CONTEXT & 2
+  AddMixer(0, mid_topic_, 0.0003);
+#endif
+#if LATENT_TOPIC_CONTEXT & 4
+  AddMixer(0, fine_topic_, 0.0002);
+#endif
 
   input_size = mixer_0_.size() + auxiliary_size_;
   layers_[1].SetNumModels(input_size);
@@ -175,6 +192,9 @@ void Predictor::AddMixers() {
 int lstmpr=0, lstmex=0;
 float byte_mixer_output=0.0f;
 float Predictor::Predict() {
+#if LATENT_TOPIC_CONTEXT
+  UpdateLatentTopics();
+#endif
   unsigned int input_index = 0;
   auto bracket_model_output = bracket_model_->Predict()[0];
   layers_[0].SetInput(input_index++, bracket_model_output);
