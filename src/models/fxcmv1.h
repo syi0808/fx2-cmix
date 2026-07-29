@@ -2,6 +2,7 @@
 //#define FXCM_H
 
 #include "model.h"
+#include <cstdint>
 #include <vector>
 #include <memory>
 
@@ -18,7 +19,7 @@ public:
 class FXCM : public Model {
  public:
   FXCM();
-  const std::valarray<float>& Predict() const;
+  const std::valarray<uint16_t>& Predict() const;
   unsigned int NumOutputs();
   void Perceive(int bit);
   void ByteUpdate() {};

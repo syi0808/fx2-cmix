@@ -91,13 +91,12 @@ inline int max(int a, int b) {return a<b?b:a;}
 #endif
 
 int num_models = 439+1-2-7;
-std::valarray<float> model_predictions(0.5f, num_models);
+std::valarray<uint16_t> model_predictions(uint16_t{4096}, num_models);
 unsigned int prediction_index = 0;
-float conversion_factor = 1.0 / 4095;
 
 void AddPrediction(int x) {
     assert(prediction_index >= 0 && prediction_index < num_models);
-    model_predictions[prediction_index++] = x * conversion_factor;
+    model_predictions[prediction_index++] = x;
 }
 
 void ResetPredictions() {
@@ -4809,7 +4808,7 @@ FXCM::FXCM() {
     predictor_.reset(new fxcmv1::Predictor());
 }
 
-const std::valarray<float>& FXCM::Predict() const{
+const std::valarray<uint16_t>& FXCM::Predict() const{
     return fxcmv1::model_predictions;
 }
 
@@ -4821,4 +4820,3 @@ void FXCM::Perceive(int bit) {
     fxcmv1::x.y = bit;
     predictor_->update();
 }
-

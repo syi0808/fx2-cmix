@@ -181,7 +181,7 @@ float Predictor::Predict() {
 
   const auto& fxcm_model_outputs = fxcm_model_.Predict();
   for (unsigned int j = 0; j < fxcm_model_outputs.size(); ++j) {
-    layers_[0].SetInput(input_index, fxcm_model_outputs[j]);
+    layers_[0].SetInputFrom12Bit(input_index, fxcm_model_outputs[j]);
     ++input_index;
   }
   auto fxcm_model_index = input_index - 1;
@@ -369,4 +369,3 @@ void Predictor::Pretrain(int bit) {
     manager_.bit_context_ = 1;
   }
 }
-

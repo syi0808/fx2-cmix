@@ -3,6 +3,8 @@
 
 #include "sigmoid.h"
 
+#include <array>
+#include <cstdint>
 #include <valarray>
 #include <vector>
 
@@ -11,6 +13,7 @@ class MixerInput {
   MixerInput(const Sigmoid& sigmoid, float eps);
   void SetNumModels(int num_models);
   void SetInput(int index, float p);
+  void SetInputFrom12Bit(int index, uint16_t p);
   void SetStretchedInput(int index, float p);
   void SetZero(int index);
   void SetExtraInput(size_t index, float p);
@@ -26,7 +29,7 @@ class MixerInput {
   std::valarray<float> extra_inputs_;
   const Sigmoid& sigmoid_;
   float min_, max_, stretched_min_, stretched_max_;
+  std::array<float, 4097> input_12_bit_;
 };
 
 #endif
-
