@@ -116,6 +116,49 @@ For the PGO/self-extracting build, use:
 LATENT_TOPIC_CONTEXT=7 ./build_and_construct_comp.sh
 ```
 
-The article counter is updated from decoded `</page>` boundaries in FXCM, so
-compression and decompression derive the same context without storing topic
+The predictor updates the article counter from decoded `</page>` boundaries,
+so compression and decompression derive the same context without storing topic
 metadata. Use `LATENT_TOPIC_CONTEXT=0` for the reorder-only ablation.
+
+## 5. Run a bounded shadow evaluation
+
+Create a small corpus without copying complete, potentially very large pages:
+
+```bash
+python3 experiments/article_order/build_mini_corpus.py \
+  --input /data/enwik9 \
+  --features /data/article-order/structural.tsv \
+  --order src/readalike_prepr/data/new_article_order \
+  --output /data/article-order/mini-ordered.xml \
+  --segment 0:512 \
+  --segment 40000:512 \
+  --segment 80000:512 \
+  --segment 120000:512 \
+  --text-bytes 512
+```
+
+Add `--shuffle-seed 923` to build a control containing exactly the same pages
+in random order.
+
+`LATENT_TOPIC_SHADOW_EVAL=1` evaluates masks `0`, `1`, `2`, `4`, and `7`
+simultaneously while the mask-0 model produces the actual compressed stream:
+
+```bash
+make CFLAGS_DEFINES="\
+  -DSEED=923 -DUPDATE_LIMIT=3000 \
+  -DLATENT_TOPIC_CONTEXT=0 \
+  -DLATENT_TOPIC_SHADOW_EVAL=1 \
+  -DLATENT_TOPIC_COARSE_SHIFT=9 \
+  -DLATENT_TOPIC_MID_SHIFT=6 \
+  -DLATENT_TOPIC_FINE_SHIFT=3"
+
+./cmix -n /data/article-order/mini-ordered.xml \
+  /data/article-order/mini-ordered.cmix 2> /data/article-order/mini-ordered.log
+```
+
+The scaled shifts represent 512/64/8-article blocks. Each `topic-shadow` line
+reports the adaptive top mixer's pre-SSE log-loss and its byte-equivalent delta
+from mask 0. It is a fast counterfactual ranking, not an exact archive-size
+measurement: the shared SSE layer and compressor/code metadata are outside the
+shadow branches. Confirm only promising candidates with a normal
+`LATENT_TOPIC_CONTEXT` build.

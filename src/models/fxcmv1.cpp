@@ -84,9 +84,6 @@ unsigned long long wrtcxt=0;
 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7};
 namespace fxcmv1 {
 
-#if LATENT_TOPIC_CONTEXT
-U32 latent_article_index=0;
-#endif
 #ifndef min
 inline int min(int a, int b) {return a<b?a:b;}
 inline int max(int a, int b) {return a<b?b:a;}
@@ -3961,14 +3958,7 @@ int modelPrediction(int c0,int bpos,int c4){
             if ((buffer1(5)==charSwap(LESSTHAN)) && (c1==GREATERTHAN  ) &&(buffer1(4)=='p'  )&& isPre==false && strcmp(so, "pre")==0) isPre=true,so=&sonull;
             else if ((buffer1(5)=='/') && (c1==GREATERTHAN) &&(buffer1(4)=='p'  )&& strcmp(so, "pre")==0) isPre=false,so=&sonull;
 
-#if LATENT_TOPIC_CONTEXT
-            if ((buffer1(6)=='/') && (c1==GREATERTHAN) &&(buffer1(5)=='p'  )&& strcmp(so, "page")==0) {
-                isPre=isMath=isNowiki=false;
-                latent_article_index++;
-            }
-#else
             if ((buffer1(6)=='/') && (c1==GREATERTHAN) &&(buffer1(5)=='p'  )&& strcmp(so, "page")==0) isPre=isMath=isNowiki=false;
-#endif
 
             // Update word0 pos
             wp[word0&0xffff]=pos;
@@ -4814,9 +4804,6 @@ inline void Predictor::update() {
 }
 
 FXCM::FXCM() {
-#if LATENT_TOPIC_CONTEXT
-    fxcmv1::latent_article_index = 0;
-#endif
     predictor_.reset(new fxcmv1::Predictor());
 }
 
@@ -4832,9 +4819,3 @@ void FXCM::Perceive(int bit) {
     fxcmv1::x.y = bit;
     predictor_->update();
 }
-
-#if LATENT_TOPIC_CONTEXT
-uint32_t FXCM::ArticleIndex() const {
-    return fxcmv1::latent_article_index;
-}
-#endif

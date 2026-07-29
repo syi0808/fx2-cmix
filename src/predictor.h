@@ -34,9 +34,38 @@
 #include <memory>
 #include <optional>
 
+#if LATENT_TOPIC_SHADOW_EVAL
+struct TopicShadowBranch {
+  TopicShadowBranch(const Sigmoid& sigmoid,
+      const std::valarray<float>& model_inputs,
+      const unsigned long long& zero_context, size_t base_mixer_count,
+      unsigned int mask);
+  void SetBaseOutput(size_t index, float prediction);
+  void Predict(uint32_t article_index, float fxcm_input, float byte_mixer_input,
+      float override_prediction);
+  void Perceive(int bit);
+
+  unsigned int mask_;
+  size_t base_mixer_count_;
+  unsigned long long coarse_topic_ = 0;
+  unsigned long long mid_topic_ = 0;
+  unsigned long long fine_topic_ = 0;
+  MixerInput extra_layer_;
+  MixerInput top_layer_;
+  std::vector<std::unique_ptr<Mixer>> topic_mixers_;
+  std::unique_ptr<Mixer> top_mixer_;
+  double loss_bits_ = 0;
+  unsigned long long bits_ = 0;
+  float prediction_ = 0.5;
+};
+#endif
+
 class Predictor {
  public:
   Predictor(const std::vector<bool>& vocab);
+#if LATENT_TOPIC_SHADOW_EVAL
+  ~Predictor();
+#endif
   float Predict();
   void Perceive(int bit);
   void Pretrain(int bit);
@@ -55,6 +84,12 @@ class Predictor {
   void AddMixers();
 #if LATENT_TOPIC_CONTEXT
   void UpdateLatentTopics();
+#endif
+#if LATENT_TOPIC_CONTEXT || LATENT_TOPIC_SHADOW_EVAL
+  void UpdateArticleIndex(unsigned char byte);
+#endif
+#if LATENT_TOPIC_SHADOW_EVAL
+  void AddShadowBranches();
 #endif
 
   llvm::SmallVector<Indirect<Nonstationary>, 30-7> indirect_ns_models_; // non-stationary
@@ -81,6 +116,13 @@ class Predictor {
   unsigned long long coarse_topic_ = 0;
   unsigned long long mid_topic_ = 0;
   unsigned long long fine_topic_ = 0;
+#endif
+#if LATENT_TOPIC_SHADOW_EVAL
+  std::vector<std::unique_ptr<TopicShadowBranch>> shadow_branches_;
+#endif
+#if LATENT_TOPIC_CONTEXT || LATENT_TOPIC_SHADOW_EVAL
+  uint32_t article_index_ = 0;
+  unsigned long long article_tail_ = 0;
 #endif
 };
 
