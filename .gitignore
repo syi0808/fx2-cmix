@@ -8,3 +8,6 @@ changes.v2
 logs
 __pycache__/
 *.pyc
+enwik9
+enwik9.zip
+experiment-data/

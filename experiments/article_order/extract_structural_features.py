@@ -186,7 +186,11 @@ def extract(args: argparse.Namespace) -> tuple[int, int]:
                     )
 
     if in_page:
-        raise ValueError(f"unterminated article {article_index}")
+        print(
+            f"ignored truncated trailing article {article_index}",
+            file=sys.stderr,
+        )
+        article_index -= 1
     return article_index + 1, nonredirect_index
 
 

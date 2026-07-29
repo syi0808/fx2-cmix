@@ -2,7 +2,11 @@
 #define SELF_EXTRACT_H 
 
 #include <stdlib.h>
+#ifdef __linux__
 #include <malloc.h>
+#else
+inline int malloc_trim(size_t) { return 0; }
+#endif
 
 #include <string>
 

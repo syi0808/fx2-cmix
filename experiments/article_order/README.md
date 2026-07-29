@@ -14,7 +14,9 @@ python3 experiments/article_order/extract_structural_features.py \
 The extractor follows the redirect rules used by
 `src/readalike_prepr/article_remap.cpp`. Its `article_index` is the zero-based
 position in the original XML and is compatible with the existing `remap`
-command.
+command. The fixed-size enwik9 corpus ends during the next article; that
+truncated trailing page is intentionally ignored, matching the C++ reorder
+parser.
 
 ## 2. Build an order
 
@@ -50,6 +52,21 @@ make remap
   > src/readalike_prepr/data/new_article_order
 ```
 
+If the original embedding vectors are unavailable, the current semantic order
+can be reused as a smooth position prior:
+
+```bash
+python3 experiments/article_order/extract_order_position_features.py \
+  --features /data/article-order/structural.tsv \
+  --order src/readalike_prepr/data/new_article_order \
+  --output /data/article-order/current-position.tsv
+
+python3 experiments/article_order/build_hierarchical_order.py \
+  --block /data/article-order/current-position.tsv:0.5 \
+  --block /data/article-order/structural.tsv:0.5 \
+  --output /data/article-order/order.txt
+```
+
 ## 3. Record a result
 
 ```bash
@@ -67,6 +84,17 @@ python3 experiments/article_order/record_result.py \
 
 Always compare `total_submission_bytes`, not only the compressed body. A full
 candidate is valid only when `restored_sha256_matches` is true.
+
+Before committing to a multi-day cmix run, a cheap full-corpus locality proxy
+can be produced without materializing the reordered XML:
+
+```bash
+python3 experiments/article_order/reorder_corpus.py \
+  --input /data/enwik9 \
+  --features /data/article-order/structural.tsv \
+  --order src/readalike_prepr/data/new_article_order \
+  | gzip -9 > /data/article-order/current-pages.xml.gz
+```
 
 ## 4. Enable latent topic mixers
 
