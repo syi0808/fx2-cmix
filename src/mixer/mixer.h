@@ -7,14 +7,10 @@
 #include <memory>
 
 struct ContextData {
-  ContextData(unsigned long long input_size,
-      unsigned long long extra_input_size) : /*steps(0), */weights(input_size),
-      extra_weights(extra_input_size) {};
-  ContextData& operator=(const ContextData&) = default;
-  ContextData(const ContextData&) = default;
+  ContextData(size_t input_size, size_t extra_input_size)
+      : weights(input_size), extra_weights(extra_input_size) {}
   //unsigned long long steps;
-  std::valarray<float> weights, extra_weights;
-  
+  std::vector<float> weights, extra_weights;
 };
 
 class Mixer {
@@ -36,7 +32,7 @@ class Mixer {
   unsigned long long /*max_steps_,*/ steps_;
   emhash6::HashMap<unsigned int, ContextData> context_map_;
   ContextData context_base_;
+  ContextData* active_data_;
 };
 
 #endif
-
