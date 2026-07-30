@@ -1,0 +1,30 @@
+name: enwik9 numeric audit
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download official enwik9
+        run: |
+          curl --fail --location --retry 5 --retry-delay 2 \
+            --output enwik9.zip https://mattmahoney.net/dc/enwik9.zip
+          unzip -q enwik9.zip
+          test "$(wc -c < enwik9)" = "1000000000"
+          echo "e206c3450ac99950df65bf70ef61a12d  enwik9" | md5sum --check --strict
+      - name: Audit numeric content
+        run: |
+          python3 tools/audit_enwik9_numbers.py enwik9 | tee enwik9-numeric-audit.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: enwik9-numeric-audit
+          path: enwik9-numeric-audit.json
+          retention-days: 3
