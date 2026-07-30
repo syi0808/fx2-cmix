@@ -34,6 +34,10 @@
 #include <memory>
 #include <optional>
 
+#ifndef NUMERIC_LOCAL_MODEL
+#define NUMERIC_LOCAL_MODEL 0
+#endif
+
 class Predictor {
  public:
   Predictor(const std::vector<bool>& vocab);
@@ -52,9 +56,10 @@ class Predictor {
   void AddDirect();
   void AddMatch();
   void AddDoubleIndirect();
+  void AddNumeric();
   void AddMixers();
 
-  llvm::SmallVector<Indirect<Nonstationary>, 30-7> indirect_ns_models_; // non-stationary
+  llvm::SmallVector<Indirect<Nonstationary>, 24> indirect_ns_models_; // non-stationary
   llvm::SmallVector<Indirect<RunMap>, 1> indirect_r_models_; // run map
   llvm::SmallVector<Direct, 1> direct_models_;
   llvm::SmallVector<Match, 10> match_models_;

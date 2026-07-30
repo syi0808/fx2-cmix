@@ -13,6 +13,7 @@
 #include "contexts/interval-hash.h"
 #include "contexts/indirect-hash.h"
 #include "contexts/sparse.h"
+#include "contexts/numeric-context.h"
 
 #include <cmath>
 #include "ds/SmallVector.h"
@@ -95,6 +96,7 @@ struct ContextManager {
   std::vector<uint32_t> hashes_ind2, hashes_ind3, hashes_ind5;
   RunMap run_map_;
   Nonstationary nonstationary_;
+  NumericContext numeric_context_;
 };
 
 #endif

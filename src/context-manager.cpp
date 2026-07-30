@@ -184,6 +184,7 @@ void ContextManager::UpdateContexts(int bit) {
     UpdateWords();
     UpdateRecentBytes();
     UpdateWRTContext();
+    numeric_context_.Update(static_cast<uint8_t>(bit_context_));
 
     for (auto& context : context_hash_contexts_) {
       context.Update();
