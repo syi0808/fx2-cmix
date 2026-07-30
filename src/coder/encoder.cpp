@@ -12,6 +12,10 @@
 #include <iterator>
 #include <string>
 
+#ifndef URL_TRACE
+#define URL_TRACE 1
+#endif
+
 namespace {
 
 const char* const kModelNames[] = {
@@ -330,18 +334,137 @@ struct NumericTrace {
   std::array<uint8_t, 8> byte_bits_ = {};
 };
 
+struct UrlTrace {
+  struct Bucket {
+    uint64_t urls = 0;
+    uint64_t bytes = 0;
+    double bits = 0;
+  };
+
+  explicit UrlTrace(const char* path) : path_(path ? path : "") {}
+
+  void AddBit(int bit, unsigned int probability, const UrlState& state) {
+    if (bit_count_ == 0) {
+      role_ = state.role;
+      active_ = state.confidence == UrlConfidence::UrlConfirmed;
+      domain_hash_ = state.domain_hash;
+      template_hash_ = state.path_template_hash;
+      if (active_ && !previous_active_) {
+        ++current_url_id_;
+      }
+    }
+    byte_loss_ += BitLoss(
+        bit, static_cast<double>(probability) / 65536.0);
+    if (++bit_count_ == 8) {
+      AddByte();
+      bit_count_ = 0;
+      byte_loss_ = 0;
+    }
+  }
+
+  void AddByte() {
+    const std::string role = UrlRoleName(role_);
+    Bucket& role_bucket = roles_[role];
+    ++role_bucket.bytes;
+    role_bucket.bits += byte_loss_;
+    if (role_last_url_[role] != current_url_id_ && active_) {
+      ++role_bucket.urls;
+      role_last_url_[role] = current_url_id_;
+    }
+    if (active_ && domain_hash_) {
+      const std::string domain = Hex(domain_hash_);
+      Bucket& bucket = domains_[domain];
+      ++bucket.bytes;
+      bucket.bits += byte_loss_;
+      if (domain_last_url_[domain] != current_url_id_) {
+        ++bucket.urls;
+        domain_last_url_[domain] = current_url_id_;
+      }
+      if (template_hash_) {
+        const std::string endpoint_key =
+            domain + ":" + Hex(template_hash_);
+        Bucket& endpoint = endpoints_[endpoint_key];
+        ++endpoint.bytes;
+        endpoint.bits += byte_loss_;
+        if (endpoint_last_url_[endpoint_key] != current_url_id_) {
+          ++endpoint.urls;
+          endpoint_last_url_[endpoint_key] = current_url_id_;
+        }
+      }
+    }
+    previous_active_ = active_;
+  }
+
+  static std::string Hex(uint64_t value) {
+    char buffer[17] = {};
+    std::snprintf(buffer, sizeof(buffer), "%016llx",
+        static_cast<unsigned long long>(value));
+    return buffer;
+  }
+
+  void WriteMap(FILE* output, const char* dimension,
+      const std::map<std::string, Bucket>& buckets) const {
+    for (const auto& item : buckets) {
+      const double bpb =
+          item.second.bytes ? item.second.bits / item.second.bytes : 0;
+      std::fprintf(output, "%s,%s,%llu,%llu,%.9f,%.9f\n", dimension,
+          item.first.c_str(),
+          static_cast<unsigned long long>(item.second.urls),
+          static_cast<unsigned long long>(item.second.bytes),
+          item.second.bits, bpb);
+    }
+  }
+
+  void Write() const {
+    if (path_.empty()) return;
+    FILE* output = std::fopen(path_.c_str(), "w");
+    if (!output) {
+      std::fprintf(stderr, "\ncan't open URL trace: %s\n", path_.c_str());
+      return;
+    }
+    std::fprintf(output, "dimension,key,url_count,bytes,bits,bpb\n");
+    WriteMap(output, "role", roles_);
+    WriteMap(output, "domain", domains_);
+    WriteMap(output, "endpoint", endpoints_);
+    std::fclose(output);
+  }
+
+  std::string path_;
+  std::map<std::string, Bucket> roles_;
+  std::map<std::string, Bucket> domains_;
+  std::map<std::string, Bucket> endpoints_;
+  std::map<std::string, uint64_t> role_last_url_;
+  std::map<std::string, uint64_t> domain_last_url_;
+  std::map<std::string, uint64_t> endpoint_last_url_;
+  UrlRole role_ = UrlRole::Outside;
+  uint64_t domain_hash_ = 0;
+  uint64_t template_hash_ = 0;
+  uint8_t bit_count_ = 0;
+  double byte_loss_ = 0;
+  bool active_ = false;
+  bool previous_active_ = false;
+  uint64_t current_url_id_ = 0;
+};
+
 Encoder::Encoder(std::ofstream* os, Predictor* p) : os_(os), x1_(0),
-    x2_(0xffffffff), p_(p), numeric_trace_(nullptr) {
+    x2_(0xffffffff), p_(p), numeric_trace_(nullptr), url_trace_(nullptr) {
   const char* trace_path = std::getenv("FX2_NUMERIC_TRACE");
   const char* probability_path = std::getenv("FX2_NUMERIC_PROB_TRACE");
   if ((trace_path && trace_path[0]) ||
       (probability_path && probability_path[0])) {
     numeric_trace_ = new NumericTrace(trace_path, probability_path);
   }
+#if URL_TRACE
+  const char* url_trace_path = std::getenv("FX2_URL_TRACE");
+  if (url_trace_path && url_trace_path[0]) {
+    url_trace_ = new UrlTrace(url_trace_path);
+  }
+#endif
 }
 
 Encoder::~Encoder() {
   delete numeric_trace_;
+  delete url_trace_;
 }
 
 void Encoder::WriteByte(unsigned int byte) {
@@ -357,6 +480,9 @@ void Encoder::Encode(int bit) {
   if (numeric_trace_) {
     numeric_trace_->AddBit(bit, p, p_->NumericModelProbabilities(),
         p_->NumericStartWordBucket(), p_->NumericStartWrtBucket());
+  }
+  if (url_trace_) {
+    url_trace_->AddBit(bit, p, p_->CurrentUrlState());
   }
   const unsigned int xmid = x1_ + ((x2_ - x1_) >> 16) * p +
       (((x2_ - x1_) & 0xffff) * p >> 16);
@@ -385,4 +511,5 @@ void Encoder::Flush() {
   auto* data = reinterpret_cast<const char*>(out_.data());
   os_->write(data, out_.size());
   if (numeric_trace_) numeric_trace_->Write();
+  if (url_trace_) url_trace_->Write();
 }

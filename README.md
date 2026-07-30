@@ -239,3 +239,37 @@ conditioned on run length, start structure, and linked shape prefix.
 and `FX2_KEEP_TEMP=1` retains ordinary temporary streams. Set `PRETRAIN=0` on
 the benchmark script only for quick smoke runs that intentionally omit
 dictionary pretraining.
+
+# URL structure experiments
+
+The URL model is enabled by default and tracks semantic WRT punctuation,
+scheme, domain labels, path templates, extensions, query keys and value
+classes. Its gated syntax, component, relation, template and match heads can
+be ablated with:
+
+```text
+URL_MODEL
+URL_SYNTAX_HEAD
+URL_COMPONENT_HEAD
+URL_RELATION_HEAD
+URL_TEMPLATE_HEAD
+URL_MATCH_HEAD
+URL_ROLE_MIXER
+URL_TRACE
+```
+
+Run the detector test and a baseline/complete benchmark with:
+
+```bash
+make url-context-test CC=clang++
+experiments/url-model/build_fixture.py /tmp/url-predictor
+INPUT_LIMIT=262144 PRETRAIN=0 \
+  scripts/bench_url_model.sh /tmp/url-predictor dictionary/english.dic
+```
+
+`FX2_URL_TRACE=trace.csv` records final surprisal grouped by URL role, domain
+hash and endpoint template hash. Compare two traces with:
+
+```bash
+tools/analyze_url_trace.py baseline.trace.csv complete.trace.csv
+```

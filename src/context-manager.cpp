@@ -1,4 +1,5 @@
 #include "context-manager.h"
+#include "preprocess/symbols.h"
 extern unsigned long long wrtcxt;
 
 extern const unsigned char wrt_2b[256];
@@ -41,24 +42,27 @@ const unsigned char wrt_4b[256]={
  1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
  1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0,
   };
-#define COLON         'J' // :
-#define SEMICOLON     'K' // ;
-#define LESSTHAN      'L' // <
-#define EQUALS        'M' // =
-#define GREATERTHAN   'N' // >
-#define QUESTION      'O' // ?
+#define COLON preprocess::kWrtColon
+#define SEMICOLON preprocess::kWrtSemicolon
+#define LESSTHAN preprocess::kWrtLessThan
+#define EQUALS preprocess::kWrtEquals
+#define GREATERTHAN preprocess::kWrtGreaterThan
+#define QUESTION preprocess::kWrtQuestion
 #define FIRSTUPPER     64 // @ - wrt first char in word is in upper case
 #define SQUAREOPEN     91 // [
 #define BACKSLASH      92 // '\'
 #define SQUARECLOSE    93 // ]
-#define CURLYOPENING  'P' // {
-#define VERTICALBAR   'Q' // |
-#define CURLYCLOSE    'R' // }
+#define CURLYOPENING preprocess::kWrtCurlyOpen
+#define VERTICALBAR preprocess::kWrtVerticalBar
+#define CURLYCLOSE preprocess::kWrtCurlyClose
 
 ContextManager::ContextManager() : history_(60000000, 0),
     shared_map_(256*400000, 0), numeric_boundary_map_(1 << 20, 0),
     numeric_linked_map_(1 << 20, 0), numeric_start_map_(2 << 20, 0),
     words_(8, 0), recent_bytes_(8, 0) {
+    for (auto& map : url_maps_) {
+      map.resize(URL_MODEL ? (1 << 20) : 258, 0);
+    }
     hashes_ind1.resize(0x1000000, 0);
     hashes_ind2.resize(0x1000000, 0);
     hashes_ind3.resize(0x2000000, 0);
@@ -188,6 +192,7 @@ void ContextManager::UpdateContexts(int bit) {
     UpdateWRTContext();
     numeric_sequence_.Update(static_cast<uint8_t>(bit_context_), words_[2],
         wrt_context_, b3stream, static_cast<uint8_t>(line_break_));
+    url_context_.Update(static_cast<uint8_t>(bit_context_));
 
     for (auto& context : context_hash_contexts_) {
       context.Update();

@@ -7,6 +7,7 @@
 #include "../predictor.h"
 
 struct NumericTrace;
+struct UrlTrace;
 
 class Encoder {
  public:
@@ -24,5 +25,6 @@ class Encoder {
   unsigned int x1_, x2_;
   Predictor* p_;
   NumericTrace* numeric_trace_;
+  UrlTrace* url_trace_;
 };
 #endif

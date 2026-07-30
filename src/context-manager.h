@@ -14,12 +14,18 @@
 #include "contexts/indirect-hash.h"
 #include "contexts/sparse.h"
 #include "contexts/numeric-sequence-context.h"
+#include "contexts/url-context.h"
 
 #include <cmath>
 #include "ds/SmallVector.h"
 
 #include <cstdint>
+#include <array>
 #include <vector>
+
+#ifndef URL_MODEL
+#define URL_MODEL 1
+#endif
 
 struct ContextManager {
   ContextManager();
@@ -90,6 +96,7 @@ struct ContextManager {
   std::vector<unsigned char> history_, shared_map_;
   std::vector<unsigned char> numeric_boundary_map_, numeric_linked_map_,
       numeric_start_map_;
+  std::array<std::vector<unsigned char>, 4> url_maps_;
   std::vector<unsigned long long> words_, recent_bytes_;
   llvm::SmallVector<ContextHash, 12> context_hash_contexts_;
   llvm::SmallVector<Sparse, 18> sparse_contexts_;
@@ -99,6 +106,7 @@ struct ContextManager {
   RunMap run_map_;
   Nonstationary nonstationary_;
   NumericSequenceContext numeric_sequence_;
+  UrlContext url_context_;
 };
 
 #endif

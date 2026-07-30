@@ -13,6 +13,7 @@
 #include "models/direct-hash.h"
 #include "models/indirect.h"
 #include "models/conditional-indirect.h"
+#include "models/gated-model.h"
 #include "models/match.h"
 #include "models/ppmd.h"
 #include "models/bracket.h"
@@ -26,6 +27,7 @@
 #include "contexts/interval-hash.h"
 #include "contexts/bit-context.h"
 #include "contexts/combined-context.h"
+#include "contexts/url-context.h"
 
 #include "ds/SmallVector.h"
 #include "ds/emhash_set.hpp"
@@ -51,6 +53,27 @@
 #ifndef NUMERIC_BOUNDARY_MIXER
 #define NUMERIC_BOUNDARY_MIXER 0
 #endif
+#ifndef URL_MODEL
+#define URL_MODEL 1
+#endif
+#ifndef URL_SYNTAX_HEAD
+#define URL_SYNTAX_HEAD URL_MODEL
+#endif
+#ifndef URL_COMPONENT_HEAD
+#define URL_COMPONENT_HEAD URL_MODEL
+#endif
+#ifndef URL_RELATION_HEAD
+#define URL_RELATION_HEAD URL_MODEL
+#endif
+#ifndef URL_TEMPLATE_HEAD
+#define URL_TEMPLATE_HEAD URL_MODEL
+#endif
+#ifndef URL_MATCH_HEAD
+#define URL_MATCH_HEAD URL_MODEL
+#endif
+#ifndef URL_ROLE_MIXER
+#define URL_ROLE_MIXER URL_MODEL
+#endif
 
 class Predictor {
  public:
@@ -67,6 +90,9 @@ class Predictor {
   uint8_t NumericStartWrtBucket() const {
     return manager_.numeric_sequence_.StartWrtBucket();
   }
+  const UrlState& CurrentUrlState() const {
+    return manager_.url_context_.State();
+  }
 
  private:
   unsigned long long GetNumModels();
@@ -82,12 +108,16 @@ class Predictor {
   void AddNumericBoundary();
   void AddNumericLinked();
   void AddNumericStart();
+  void AddUrl();
   void AddMixers();
 
   llvm::SmallVector<Indirect<Nonstationary>, 30-7> indirect_ns_models_; // non-stationary
   llvm::SmallVector<Indirect<RunMap>, 1> indirect_r_models_; // run map
   llvm::SmallVector<ConditionalIndirect<Nonstationary>, 4>
       conditional_numeric_models_;
+  llvm::SmallVector<GatedModel<Indirect<Nonstationary>>, 4>
+      gated_url_models_;
+  llvm::SmallVector<GatedModel<Match>, 1> gated_url_match_models_;
   llvm::SmallVector<Direct, 1> direct_models_;
   llvm::SmallVector<Match, 10> match_models_;
   

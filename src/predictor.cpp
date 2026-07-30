@@ -14,6 +14,7 @@ Predictor::Predictor(const std::vector<bool>& vocab) : manager_(),
   AddNumericBoundary();
   AddNumericLinked();
   AddNumericStart();
+  AddUrl();
   AddMixers();
   auxiliary_size_ = 2;
 }
@@ -29,6 +30,8 @@ unsigned long long Predictor::GetNumModels() {
   num += indirect_ns_models_.size();
   num += indirect_r_models_.size();
   num += conditional_numeric_models_.size();
+  num += gated_url_models_.size();
+  num += gated_url_match_models_.size();
   num += byte_model_->NumOutputs();
   num += byte_mixer_->NumOutputs();
   return num;
@@ -158,6 +161,39 @@ void Predictor::AddNumericStart() {
 #endif
 }
 
+void Predictor::AddUrl() {
+#if URL_SYNTAX_HEAD
+  gated_url_models_.emplace_back(
+      manager_.url_context_.SyntaxGate(), manager_.nonstationary_,
+      manager_.url_context_.SyntaxContext(), manager_.bit_context_, 100,
+      manager_.url_maps_[0], 0x13579);
+#endif
+#if URL_COMPONENT_HEAD
+  gated_url_models_.emplace_back(
+      manager_.url_context_.ActiveGate(), manager_.nonstationary_,
+      manager_.url_context_.ComponentContext(), manager_.bit_context_, 100,
+      manager_.url_maps_[1], 0x2468a);
+#endif
+#if URL_RELATION_HEAD
+  gated_url_models_.emplace_back(
+      manager_.url_context_.RelationGate(), manager_.nonstationary_,
+      manager_.url_context_.RelationContext(), manager_.bit_context_, 100,
+      manager_.url_maps_[2], 0x3579b);
+#endif
+#if URL_TEMPLATE_HEAD
+  gated_url_models_.emplace_back(
+      manager_.url_context_.TemplateGate(), manager_.nonstationary_,
+      manager_.url_context_.TemplateContext(), manager_.bit_context_, 150,
+      manager_.url_maps_[3], 0x468ac);
+#endif
+#if URL_MATCH_HEAD
+  gated_url_match_models_.emplace_back(
+      manager_.url_context_.ActiveGate(), manager_.history_,
+      manager_.url_context_.MatchContext(), manager_.bit_context_, 192, 0.5,
+      1000000, &manager_.longest_match_, &manager_.history_pos_);
+#endif
+}
+
 unsigned int Discretize(float p) {
   return 1 + 4094 * p;
 }
@@ -204,6 +240,10 @@ void Predictor::AddMixers() {
 #if NUMERIC_BOUNDARY_MIXER
   AddMixer(0, manager_.numeric_sequence_.BoundaryMixerContext(), 0.005,
       &manager_.numeric_sequence_.BoundaryActive());
+#endif
+#if URL_ROLE_MIXER
+  AddMixer(0, manager_.url_context_.MixerContext(), 0.001,
+      &manager_.url_context_.SyntaxGate());
 #endif
 
   input_size = mixer_0_.size() + auxiliary_size_;
@@ -257,6 +297,12 @@ float Predictor::Predict() {
       layers_[0].SetInput(input_index, outputs[j]);
       ++input_index;
     }
+  }
+  for (auto& model : gated_url_match_models_) {
+    layers_[0].SetInput(input_index++, model.Predict()[0]);
+  }
+  for (auto& model : gated_url_models_) {
+    layers_[0].SetInput(input_index++, model.Predict()[0]);
   }
   numeric_model_probabilities_.fill(0.5f);
   unsigned int numeric_output_index = 0;
@@ -335,6 +381,12 @@ void Predictor::Perceive(int bit) {
   for (auto& model : conditional_numeric_models_) {
     model.Perceive(bit);
   }
+  for (auto& model : gated_url_match_models_) {
+    model.Perceive(bit);
+  }
+  for (auto& model : gated_url_models_) {
+    model.Perceive(bit);
+  }
 
   byte_model_->Perceive(bit);
 
@@ -370,6 +422,12 @@ void Predictor::Perceive(int bit) {
       indirect_r_models_[i].ByteUpdate();
     }
     for (auto& model : conditional_numeric_models_) {
+      model.ByteUpdate();
+    }
+    for (auto& model : gated_url_match_models_) {
+      model.ByteUpdate();
+    }
+    for (auto& model : gated_url_models_) {
       model.ByteUpdate();
     }
 
@@ -408,6 +466,12 @@ void Predictor::Pretrain(int bit) {
   for (auto& model : conditional_numeric_models_) {
     model.Predict();
   }
+  for (auto& model : gated_url_match_models_) {
+    model.Predict();
+  }
+  for (auto& model : gated_url_models_) {
+    model.Predict();
+  }
 
 
   bracket_model_->Perceive(bit);
@@ -426,6 +490,12 @@ void Predictor::Pretrain(int bit) {
     indirect_r_models_[i].Perceive(bit);
   }
   for (auto& model : conditional_numeric_models_) {
+    model.Perceive(bit);
+  }
+  for (auto& model : gated_url_match_models_) {
+    model.Perceive(bit);
+  }
+  for (auto& model : gated_url_models_) {
     model.Perceive(bit);
   }
 
@@ -449,6 +519,12 @@ void Predictor::Pretrain(int bit) {
       indirect_r_models_[i].ByteUpdate();
     }
     for (auto& model : conditional_numeric_models_) {
+      model.ByteUpdate();
+    }
+    for (auto& model : gated_url_match_models_) {
+      model.ByteUpdate();
+    }
+    for (auto& model : gated_url_models_) {
       model.ByteUpdate();
     }
     manager_.bit_context_ = 1;
