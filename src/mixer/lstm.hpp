@@ -115,8 +115,11 @@ inline std::valarray<float>& Lstm::Perceive(unsigned int input) {
 //    if (i == input) error = output_[last_epoch][i] - 1;
 //    else error = output_[last_epoch][i];
     float error = (i == input) ? (output_[last_epoch][i] - 1) : output_[last_epoch][i];
-    output_layer_[epoch_][i] = output_layer_[last_epoch][i];
-    output_layer_[epoch_][i] -= learning_rate_ * error * hidden_;
+    const float update = learning_rate_ * error;
+    for (unsigned int j = 0; j < hidden_.size(); ++j) {
+      output_layer_[epoch_][i][j] =
+          output_layer_[last_epoch][i][j] - update * hidden_[j];
+    }
   }
   return Predict(input);
 }
@@ -148,4 +151,3 @@ inline std::valarray<float>& Lstm::Predict(unsigned int input) {
   last_input_ = input;
   return output_[epoch];
 }
-
