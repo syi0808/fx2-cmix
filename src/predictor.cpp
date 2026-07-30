@@ -120,14 +120,6 @@ void Predictor::AddDoubleIndirect() {
   indirect_ns_models_.emplace_back(manager_.nonstationary_, manager_.ind3,  manager_.bit_context_, delta, manager_.shared_map_);
   indirect_ns_models_.emplace_back(manager_.nonstationary_, manager_.ind5,  manager_.bit_context_, delta, manager_.shared_map_);
 }
-
-void Predictor::AddNumeric() {
-#if NUMERIC_LOCAL_MODEL
-  indirect_ns_models_.emplace_back(
-      manager_.nonstationary_, manager_.numeric_context_.LocalContext(),
-      manager_.bit_context_, 200, manager_.shared_map_);
-#endif
-}
 unsigned int Discretize(float p) {
   return 1 + 4094 * p;
 }
@@ -138,7 +130,6 @@ void Predictor::AddMixers() {
   }
   byte_mixer_.emplace(1, manager_.bit_context_, vocab_,
       vocab_size, new Lstm(vocab_size, vocab_size, 200, 1, 128, 0.03, 10));
-  AddNumeric();
 
   for (int i = 0; i < 2; ++i) {
     layers_.emplace_back(sigmoid_,
