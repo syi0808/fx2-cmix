@@ -50,6 +50,11 @@ def parse_args() -> argparse.Namespace:
         type=int,
         help="deterministically shuffle the selected article order",
     )
+    parser.add_argument(
+        "--preserve-pages",
+        action="store_true",
+        help="copy complete source pages instead of truncating their text",
+    )
     args = parser.parse_args()
     if args.text_bytes <= 0:
         parser.error("--text-bytes must be positive")
@@ -118,10 +123,14 @@ def select_articles(
     return selected
 
 
-def extract_page(source, offset: tuple[int, int], text_bytes: int) -> bytes:
+def extract_page(
+    source, offset: tuple[int, int], text_bytes: int, preserve_page: bool
+) -> bytes:
     start, end = offset
     source.seek(start)
     page = source.read(end - start)
+    if preserve_page:
+        return page
     title_match = TITLE_PATTERN.search(page)
     text_start_match = TEXT_START_PATTERN.search(page)
     if title_match is None or text_start_match is None:
@@ -158,7 +167,14 @@ def main() -> int:
     with args.input.open("rb") as source, args.output.open("wb") as output:
         output.write(b"<mediawiki>\n")
         for article_id in selected_ids:
-            output.write(extract_page(source, offsets[article_id], args.text_bytes))
+            output.write(
+                extract_page(
+                    source,
+                    offsets[article_id],
+                    args.text_bytes,
+                    args.preserve_pages,
+                )
+            )
         output.write(b"</mediawiki>\n")
 
     print(

@@ -5,6 +5,10 @@
 #include <stdlib.h>
 #include <assert.h>
 
+#ifndef PHDA9_SCHEMA_RECORD
+#define PHDA9_SCHEMA_RECORD 0
+#endif
+
 typedef unsigned char  U8;
 typedef unsigned short U16;
 typedef unsigned int   U32;
@@ -524,6 +528,9 @@ void decode_txt_wit(FILE*in,  FILE*out1,U64 size){
     char s[8192*8];
     char o[8192*8];
     int i, j, f = 0, lastID = 0,tf=0;
+#if PHDA9_SCHEMA_RECORD
+    int lastRevisionID = 0, lastContributorID = 0, lastParentID = 0;
+#endif
     wfgets(s, 22, in);    
     U64 winfo=atoi(&s[0]);
     U64 insize=ftello(in);
@@ -555,6 +562,9 @@ void decode_txt_wit(FILE*in,  FILE*out1,U64 size){
         if (header==1){
             int n=0;
             int cont=0;
+#if PHDA9_SCHEMA_RECORD
+            int recordDone=0;
+#endif
             do {
                 *(int*)o = 0x20202020;
                 j=4;
@@ -564,7 +574,7 @@ void decode_txt_wit(FILE*in,  FILE*out1,U64 size){
                 if (*(int*)&h1p[0]==0x6E6F632F) cont=0;//'noc/'
                 int k=(int)(strchr(h1p,10)+1-(char*)h1p);
 
-                // id  
+                // id
                 if ( n==0){
                     if ( (*(int*)&h1p[0]&0xffffff)==0x3E736E){//'>sn'
                         o[j]='<';
@@ -580,13 +590,56 @@ void decode_txt_wit(FILE*in,  FILE*out1,U64 size){
                         o[k+j]=0;
                         wfputs(o,out1);
                     } else{
-                        
+
                         n++;
                         lastID = lastID+ atoi(&h1p[1]);
                         sprintf(o+j, "<id>%d</id>%c",   lastID, 10);
                         wfputs(o,out1);
                     }
                 }
+#if PHDA9_SCHEMA_RECORD
+                else if (h1p[0]=='R' && (h1p[1]=='-' || (h1p[1]>='0' && h1p[1]<='9'))){
+                    lastRevisionID += atoi(h1p+1);
+                    sprintf(o, "    <revision>%c      <id>%d</id>%c",
+                        10, lastRevisionID, 10);
+                    wfputs(o,out1);
+                }
+                else if (h1p[0]=='A' && (h1p[1]=='-' || (h1p[1]>='0' && h1p[1]<='9'))){
+                    lastParentID += atoi(h1p+1);
+                    sprintf(o, "      <parentid>%d</parentid>%c",
+                        lastParentID, 10);
+                    wfputs(o,out1);
+                }
+                else if (h1p[0]=='T'){
+                    char *p = strchr(h1p, ':');
+                    int d = atoi(h1p+3), hms = atoi(p+1), h = hms/3600;
+                    o[0]=h1p[1],o[1]=h1p[2],o[2]=' ';
+                    int y=atoi(&o[0]);
+                    sprintf(o, "      <timestamp>%d-%02d-%02dT%02d:%02d:%02dZ</timestamp>%c",
+                    y + 2001, d/31+1, d%31+1, h, hms/60 - h*60, hms%60, 10);
+                    wfputs(o,out1);
+                }
+                else if (h1p[0]=='U' || h1p[0]=='P'){
+                    char lineEnd=h1p[k-1];
+                    h1p[k-1]=0;
+                    sprintf(o, "      <contributor>%c        <%s>%s</%s>%c",
+                        10, h1p[0]=='U' ? "username" : "ip", h1p+1,
+                        h1p[0]=='U' ? "username" : "ip", 10);
+                    h1p[k-1]=lineEnd;
+                    wfputs(o,out1);
+                    cont=1;
+                }
+                else if (h1p[0]=='I' && (h1p[1]=='-' || (h1p[1]>='0' && h1p[1]<='9'))){
+                    lastContributorID += atoi(h1p+1);
+                    sprintf(o, "        <id>%d</id>%c", lastContributorID, 10);
+                    wfputs(o,out1);
+                }
+                else if (h1p[0]=='E' && h1p[1]==10){
+                    wfputs("      </contributor>\n",out1);
+                    cont=0;
+                    recordDone=1;
+                }
+#endif
                 else if (*(int*)&h1p[0]==0x656D6974 ){//'emit'
                     char *p = strchr(h1p, ':');
                     int d = atoi(&h1p[19-7]), hms = atoi(p+1), h = hms/3600;
@@ -613,19 +666,28 @@ void decode_txt_wit(FILE*in,  FILE*out1,U64 size){
                     if (*(int*)&h1p[0]==0x746E6F63) cont=1;//'tnoc'
                 }
                 h1p=h1p+k;
+#if PHDA9_SCHEMA_RECORD
+                if (recordDone) break;
+#endif
                 if (memcmp(&h1p[0],"contributor dele",16)==0)break;
             }
             while (memcmp(&h1p[0],"/contributor>",13)    );
-            *(int*)o = 0x20202020;
-            j=4;
-            *(int*)(o+j)= 0x20202020,j=j+2;
-            int k=(int)(strchr(h1p,10)+1-(char*)h1p);
-            o[j]='<';
-            memcpy(o+j+1, h1p, k);
-            o[k+j++]=10;
-            o[k+j]=0;
-            wfputs(o,out1);
-            h1p=h1p+k;
+#if PHDA9_SCHEMA_RECORD
+            if (!recordDone) {
+#endif
+                *(int*)o = 0x20202020;
+                j=4;
+                *(int*)(o+j)= 0x20202020,j=j+2;
+                int k=(int)(strchr(h1p,10)+1-(char*)h1p);
+                o[j]='<';
+                memcpy(o+j+1, h1p, k);
+                o[k+j++]=10;
+                o[k+j]=0;
+                wfputs(o,out1);
+                h1p=h1p+k;
+#if PHDA9_SCHEMA_RECORD
+            }
+#endif
             header=0;
         }
 
@@ -635,6 +697,21 @@ void decode_txt_wit(FILE*in,  FILE*out1,U64 size){
 
             }
         }
+
+#if PHDA9_SCHEMA_RECORD
+            if (strcmp(s, "\1m\n")==0) {
+                wfputs("      <minor />\n",out1);
+                continue;
+            }
+            if (strcmp(s, "\1M\n")==0) {
+                wfputs("      <model>wikitext</model>\n",out1);
+                continue;
+            }
+            if (strcmp(s, "\1F\n")==0) {
+                wfputs("      <format>text/x-wiki</format>\n",out1);
+                continue;
+            }
+#endif
 
             skipline(s,o);// remove this
             hent9(o,s);
@@ -676,6 +753,10 @@ void encode_txt_wit(FILE* in, FILE* out) {
     }
     putc('\n',out);
     int i, j, f = 0, lastID = 0,tf=0;
+#if PHDA9_SCHEMA_RECORD
+    int lastRevisionID = 0, lastContributorID = 0, lastParentID = 0;
+    bool revisionIDPending=false;
+#endif
 
   do {
     j=wfgets(s, 8192*8, in);
@@ -704,10 +785,33 @@ void encode_txt_wit(FILE* in, FILE* out) {
        sprintf(o,  ">%d%c", curID - lastID, 10);
         wfputs(o,out3);
         lastID = curID;
+#if PHDA9_SCHEMA_RECORD
+        revisionIDPending=true;
+#endif
         f = 1;
         continue;
     }
     if (f) {
+#if PHDA9_SCHEMA_RECORD
+        if (revisionIDPending && strcmp(s, "    <revision>\n")==0) {
+            continue;
+        }
+        if (revisionIDPending && memcmp(s, "      <id>", 10)==0) {
+            int revisionID=atoi(s+10);
+            sprintf(o, "R%d%c", revisionID-lastRevisionID, 10);
+            wfputs(o,out3);
+            lastRevisionID=revisionID;
+            revisionIDPending=false;
+            continue;
+        }
+        if (f==1 && memcmp(s, "      <parentid>", 16)==0) {
+            int parentID=atoi(s+16);
+            sprintf(o, "A%d%c", parentID-lastParentID, 10);
+            wfputs(o,out3);
+            lastParentID=parentID;
+            continue;
+        }
+#endif
         if (*(int*)&s[6]==0x6D69743C) {//'mit<'
             int year   = atoi(&s[17]);
             int month  = atoi(&s[22]);
@@ -715,11 +819,51 @@ void encode_txt_wit(FILE* in, FILE* out) {
             int hour   = atoi(&s[28]);
             int minute = atoi(&s[31]);
             int second = atoi(&s[34]);
-            sprintf(o, "timestamp>%02d%d:%d%c", 
+#if PHDA9_SCHEMA_RECORD
+            sprintf(o, "T%02d%d:%d%c",
+#else
+            sprintf(o, "timestamp>%02d%d:%d%c",
+#endif
                     year-2001, month*31+day-32, hour*3600+minute*60+second, 10);
             wfputs(o,out3);
             continue;
         }
+#if PHDA9_SCHEMA_RECORD
+        if (f==1 && strcmp(s, "      <contributor>\n")==0) {
+            f=3;
+            continue;
+        }
+        if (f==3 && memcmp(s, "        <username>", 18)==0) {
+            char *end=strstr(s+18, "</username>");
+            if (end!=0) {
+                *end=0;
+                sprintf(o, "U%s%c", s+18, 10);
+                wfputs(o,out3);
+                continue;
+            }
+        }
+        if (f==3 && memcmp(s, "        <ip>", 12)==0) {
+            char *end=strstr(s+12, "</ip>");
+            if (end!=0) {
+                *end=0;
+                sprintf(o, "P%s%c", s+12, 10);
+                wfputs(o,out3);
+                continue;
+            }
+        }
+        if (f==3 && memcmp(s, "        <id>", 12)==0) {
+            int contributorID=atoi(s+12);
+            sprintf(o, "I%d%c", contributorID-lastContributorID, 10);
+            wfputs(o,out3);
+            lastContributorID=contributorID;
+            continue;
+        }
+        if (f==3 && strcmp(s, "      </contributor>\n")==0) {
+            wfputs("E\n",out3);
+            f=0;
+            continue;
+        }
+#endif
          char *p =strchr(s, '>');
         if (p) {
             p = strchr(p+1, '<');
@@ -746,7 +890,22 @@ void encode_txt_wit(FILE* in, FILE* out) {
             wfputs(s+s2,out3);
         }
     }
-    else  {hent(s,o);
+    else  {
+#if PHDA9_SCHEMA_RECORD
+        if (strcmp(s, "      <minor />\n")==0) {
+            wfputs("\1m\n",out);
+            continue;
+        }
+        if (strcmp(s, "      <model>wikitext</model>\n")==0) {
+            wfputs("\1M\n",out);
+            continue;
+        }
+        if (strcmp(s, "      <format>text/x-wiki</format>\n")==0) {
+            wfputs("\1F\n",out);
+            continue;
+        }
+#endif
+        hent(s,o);
         hent2(o,s);
         hent5(s,o);
         
