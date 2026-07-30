@@ -21,7 +21,9 @@ jobs:
           test "$(wc -c < enwik9)" = "1000000000"
           echo "e206c3450ac99950df65bf70ef61a12d  enwik9" | md5sum --check --strict
       - name: Audit numeric content
+        shell: bash
         run: |
+          set -euo pipefail
           python3 tools/audit_enwik9_numbers.py enwik9 | tee enwik9-numeric-audit.json
       - uses: actions/upload-artifact@v4
         with:
