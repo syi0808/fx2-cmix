@@ -36,40 +36,57 @@ def main() -> int:
         data = mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ)
         total = len(data)
 
-        digit_freq = {str(i): data.count(bytes((48 + i,))) for i in range(10)}
-        digit_bytes = sum(digit_freq.values())
-
         run_count = 0
         run_bytes = 0
+        digit_freq_counter: collections.Counter[int] = collections.Counter()
         run_len_hist: collections.Counter[int] = collections.Counter()
         run_threshold_counts = {n: {"runs": 0, "bytes": 0} for n in (2, 4, 6, 8, 10, 16)}
         for match in DIGIT_RE.finditer(data):
-            length = match.end() - match.start()
+            token = match.group(0)
+            length = len(token)
             run_count += 1
             run_bytes += length
+            digit_freq_counter.update(token)
             run_len_hist[min(length, 32)] += 1
             for threshold, stats in run_threshold_counts.items():
                 if length >= threshold:
                     stats["runs"] += 1
                     stats["bytes"] += length
 
-        timestamps = list(ISO_TS_RE.finditer(data))
-        timestamp_region_bytes = sum(m.end() - m.start() for m in timestamps)
-        timestamp_digit_bytes = len(timestamps) * 14
+        digit_freq = {
+            str(i): digit_freq_counter[48 + i]
+            for i in range(10)
+        }
+        digit_bytes = sum(digit_freq.values())
 
-        ids = list(ID_RE.finditer(data))
-        id_digit_bytes = sum(len(m.group(1)) for m in ids)
-        id_length_hist = collections.Counter(len(m.group(1)) for m in ids)
+        timestamp_count = 0
+        timestamp_region_bytes = 0
+        for match in ISO_TS_RE.finditer(data):
+            timestamp_count += 1
+            timestamp_region_bytes += match.end() - match.start()
+        timestamp_digit_bytes = timestamp_count * 14
 
-        entities = list(NUMERIC_ENTITY_RE.finditer(data))
-        entity_digit_bytes = sum(len(m.group(1)) for m in entities)
+        id_count = 0
+        id_digit_bytes = 0
+        id_length_hist: collections.Counter[int] = collections.Counter()
+        for match in ID_RE.finditer(data):
+            length = len(match.group(1))
+            id_count += 1
+            id_digit_bytes += length
+            id_length_hist[length] += 1
 
-        hex_matches = []
+        entity_count = 0
+        entity_digit_bytes = 0
+        for match in NUMERIC_ENTITY_RE.finditer(data):
+            entity_count += 1
+            entity_digit_bytes += len(match.group(1))
+
+        hex_count = 0
         hex_bytes = 0
         for match in HEX_RE.finditer(data):
             token = match.group(0)
             if any(c in b"abcdefABCDEF" for c in token) and any(48 <= c <= 57 for c in token):
-                hex_matches.append(match)
+                hex_count += 1
                 hex_bytes += len(token)
 
         # Digit bytes can overlap among these semantic subsets. This is intentional.
@@ -97,27 +114,27 @@ def main() -> int:
                 },
             },
             "iso_timestamps": {
-                "count": len(timestamps),
+                "count": timestamp_count,
                 "full_region_bytes": timestamp_region_bytes,
                 "digit_bytes": timestamp_digit_bytes,
                 "digit_ratio_of_file": timestamp_digit_bytes / total,
                 "theoretical_savings_by_digit_improvement": theoretical_savings(timestamp_digit_bytes),
             },
             "xml_ids": {
-                "count": len(ids),
+                "count": id_count,
                 "digit_bytes": id_digit_bytes,
                 "digit_ratio_of_file": id_digit_bytes / total,
                 "length_histogram": dict(sorted(id_length_hist.items())),
                 "theoretical_savings_by_digit_improvement": theoretical_savings(id_digit_bytes),
             },
             "numeric_entities": {
-                "count": len(entities),
+                "count": entity_count,
                 "digit_bytes": entity_digit_bytes,
                 "digit_ratio_of_file": entity_digit_bytes / total,
                 "theoretical_savings_by_digit_improvement": theoretical_savings(entity_digit_bytes),
             },
             "hex_candidates": {
-                "count": len(hex_matches),
+                "count": hex_count,
                 "bytes": hex_bytes,
                 "ratio_of_file": hex_bytes / total,
                 "theoretical_savings_by_byte_improvement": theoretical_savings(hex_bytes),
