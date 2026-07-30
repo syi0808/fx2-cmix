@@ -31,14 +31,17 @@
 #define NDEBUG  // remove for debugging (turns on Array bound checks)
 #include <assert.h>
 
-// AVX2
+#if defined(__AVX2__)
 #include <immintrin.h>
+#endif
 typedef unsigned char U8;
 typedef unsigned short U16;
 typedef unsigned int U32;
 //
+#if defined(__AVX2__)
 typedef __m128i XMM;
 typedef __m256i YMM;
+#endif
 extern const U8 wrt_2b[256];
 extern const U8 wrt_3b[256];
 extern int lstmpr, lstmex;
@@ -476,6 +479,7 @@ struct Mixer1 {
 
  int dot_product (const short* const t, const short* const w, int n) {
   assert(n == ((n + 15) & -16));
+#if defined(__AVX2__)
   YMM sum = _mm256_setzero_si256 ();
   while ((n -= 16) >= 0) { // Each loop sums 16 products
     YMM tmp = _mm256_madd_epi16 (*(YMM *) &t[n], *(YMM *) &w[n]); // t[n] * w[n] + t[n+1] * w[n+1]
@@ -488,11 +492,19 @@ struct Mixer1 {
    XMM hi = _mm256_extractf128_si256(sum, 1);
    XMM newsum = _mm_add_epi32(lo, hi);                    //sum last two
    return _mm_cvtsi128_si32(newsum);
+#else
+  int sum = 0;
+  for (int index = 0; index < n; index += 2) {
+    sum += (t[index] * w[index] + t[index + 1] * w[index + 1]) >> 8;
+  }
+  return sum;
+#endif
 }
 
  void train (const short* const t, short* const w, int n, const int e) {
   assert(n == ((n + 15) & -16));
   if (e) {
+#if defined(__AVX2__)
     const YMM one = _mm256_set1_epi16 (1);
     const YMM err = _mm256_set1_epi16 (short(e));
     while ((n -= 16) >= 0) { // Each iteration adjusts 16 weights
@@ -503,6 +515,13 @@ struct Mixer1 {
       tmp = _mm256_adds_epi16 (tmp, *(YMM *) &w[n]); //                    ((((t[n] * 2 * err) >> 16) + 1) >> 1) + w[n]
       *(YMM *) &w[n] = tmp; //                                          save the new eight weights, bounded to +- 32K
     }
+#else
+    for (int index = 0; index < n; ++index) {
+      int weight = w[index] + (((t[index] * e * 2 >> 16) + 1) >> 1);
+      weight = std::max(-32768, std::min(32767, weight));
+      w[index] = static_cast<short>(weight);
+    }
+#endif
   }
 }
 
