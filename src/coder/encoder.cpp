@@ -346,6 +346,7 @@ struct UrlTrace {
   void AddBit(int bit, unsigned int probability, const UrlState& state) {
     if (bit_count_ == 0) {
       role_ = state.role;
+      confidence_ = state.confidence;
       active_ = state.confidence == UrlConfidence::UrlConfirmed;
       domain_hash_ = state.domain_hash;
       template_hash_ = state.path_template_hash;
@@ -363,6 +364,20 @@ struct UrlTrace {
   }
 
   void AddByte() {
+    Bucket& total_bucket = totals_["all"];
+    ++total_bucket.bytes;
+    total_bucket.bits += byte_loss_;
+    const char* region = "outside";
+    if (confidence_ == UrlConfidence::SchemeCandidate) region = "candidate";
+    if (confidence_ == UrlConfidence::UrlConfirmed) region = "url";
+    Bucket& region_bucket = regions_[region];
+    ++region_bucket.bytes;
+    region_bucket.bits += byte_loss_;
+    if (active_ && region_last_url_[region] != current_url_id_) {
+      ++region_bucket.urls;
+      region_last_url_[region] = current_url_id_;
+    }
+
     const std::string role = UrlRoleName(role_);
     Bucket& role_bucket = roles_[role];
     ++role_bucket.bytes;
@@ -423,6 +438,8 @@ struct UrlTrace {
       return;
     }
     std::fprintf(output, "dimension,key,url_count,bytes,bits,bpb\n");
+    WriteMap(output, "total", totals_);
+    WriteMap(output, "region", regions_);
     WriteMap(output, "role", roles_);
     WriteMap(output, "domain", domains_);
     WriteMap(output, "endpoint", endpoints_);
@@ -430,13 +447,17 @@ struct UrlTrace {
   }
 
   std::string path_;
+  std::map<std::string, Bucket> totals_;
+  std::map<std::string, Bucket> regions_;
   std::map<std::string, Bucket> roles_;
   std::map<std::string, Bucket> domains_;
   std::map<std::string, Bucket> endpoints_;
   std::map<std::string, uint64_t> role_last_url_;
+  std::map<std::string, uint64_t> region_last_url_;
   std::map<std::string, uint64_t> domain_last_url_;
   std::map<std::string, uint64_t> endpoint_last_url_;
   UrlRole role_ = UrlRole::Outside;
+  UrlConfidence confidence_ = UrlConfidence::Outside;
   uint64_t domain_hash_ = 0;
   uint64_t template_hash_ = 0;
   uint8_t bit_count_ = 0;

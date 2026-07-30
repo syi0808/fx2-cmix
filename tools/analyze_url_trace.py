@@ -63,7 +63,7 @@ def main():
 
     baseline = load_trace(args.baseline)
     variant = load_trace(args.variant)
-    for dimension in ("role", "domain", "endpoint"):
+    for dimension in ("total", "region", "role", "domain", "endpoint"):
         summarize(baseline, variant, dimension, args.limit)
 
 

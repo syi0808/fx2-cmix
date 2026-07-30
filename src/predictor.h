@@ -14,6 +14,7 @@
 #include "models/indirect.h"
 #include "models/conditional-indirect.h"
 #include "models/gated-model.h"
+#include "models/url-residual.h"
 #include "models/match.h"
 #include "models/ppmd.h"
 #include "models/bracket.h"
@@ -56,6 +57,12 @@
 #ifndef URL_MODEL
 #define URL_MODEL 1
 #endif
+#ifndef URL_INTEGRATED
+#define URL_INTEGRATED 0
+#endif
+#ifndef URL_SIDECAR
+#define URL_SIDECAR (URL_MODEL && !URL_INTEGRATED)
+#endif
 #ifndef URL_SYNTAX_HEAD
 #define URL_SYNTAX_HEAD URL_MODEL
 #endif
@@ -69,10 +76,10 @@
 #define URL_TEMPLATE_HEAD URL_MODEL
 #endif
 #ifndef URL_MATCH_HEAD
-#define URL_MATCH_HEAD URL_MODEL
+#define URL_MATCH_HEAD URL_INTEGRATED
 #endif
 #ifndef URL_ROLE_MIXER
-#define URL_ROLE_MIXER URL_MODEL
+#define URL_ROLE_MIXER URL_INTEGRATED
 #endif
 
 class Predictor {
@@ -135,6 +142,11 @@ class Predictor {
   std::vector<bool> vocab_;
   std::array<float, 4> numeric_model_probabilities_ = {
       0.5f, 0.5f, 0.5f, 0.5f};
+  std::array<float, 5> url_model_probabilities_ = {
+      0.5f, 0.5f, 0.5f, 0.5f, 0.5f};
+  size_t url_model_probability_count_ = 0;
+  UrlResidual url_residual_;
+  bool url_residual_used_ = false;
    FXCM fxcm_model_;
 };
 

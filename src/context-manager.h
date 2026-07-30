@@ -70,6 +70,7 @@ struct ContextManager {
   unsigned int bit_context_ = 1, wrt_state_ = 0, bpos=0;
   unsigned long long long_bit_context_ = 1, zero_context_ = 0, history_pos_ = 0,
       line_break_ = 0, longest_match_ = 0, auxiliary_context_ = 0,
+      url_longest_match_ = 0,
       wrt_context_ = 0,
       b2stream=0,b2streamcxt=0, o2bState=0, n2bState=0, stream2bR=0,
       b3stream=0,b3streamcxt=0,o3bState=0, n3bState=0, stream3bR=0,

@@ -244,11 +244,15 @@ dictionary pretraining.
 
 The URL model is enabled by default and tracks semantic WRT punctuation,
 scheme, domain labels, path templates, extensions, query keys and value
-classes. Its gated syntax, component, relation, template and match heads can
-be ablated with:
+classes. The default path is an SSE-after sidecar residual that leaves the
+baseline Predictor unchanged outside confirmed path, extension and query
+roles. The older layer-0 integration and URL match remain available only for
+comparison. Builds can be ablated with:
 
 ```text
 URL_MODEL
+URL_INTEGRATED
+URL_SIDECAR
 URL_SYNTAX_HEAD
 URL_COMPONENT_HEAD
 URL_RELATION_HEAD
@@ -256,6 +260,7 @@ URL_TEMPLATE_HEAD
 URL_MATCH_HEAD
 URL_ROLE_MIXER
 URL_TRACE
+URL_RESIDUAL_LEARNING_RATE
 ```
 
 Run the detector test and a baseline/complete benchmark with:
@@ -265,6 +270,20 @@ make url-context-test CC=clang++
 experiments/url-model/build_fixture.py /tmp/url-predictor
 INPUT_LIMIT=262144 PRETRAIN=0 \
   scripts/bench_url_model.sh /tmp/url-predictor dictionary/english.dic
+```
+
+The benchmark runs three repetitions by default and reports median wall/CPU
+time plus peak RSS. Use `REPEATS=1` for smoke tests, `VARIANTS='baseline
+complete integrated'` for coupling comparison, or the `no-*` variants for
+head ablations.
+
+Build a contiguous mixed-density or detector-isolation corpus with:
+
+```bash
+experiments/url-model/build_mixed_corpus.py enwik9 /tmp/mixed \
+  --bytes 10485760
+experiments/url-model/build_mixed_corpus.py enwik9 /tmp/url-free \
+  --bytes 10485760 --url-free
 ```
 
 `FX2_URL_TRACE=trace.csv` records final surprisal grouped by URL role, domain

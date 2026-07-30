@@ -30,8 +30,10 @@ unsigned long long Predictor::GetNumModels() {
   num += indirect_ns_models_.size();
   num += indirect_r_models_.size();
   num += conditional_numeric_models_.size();
+#if URL_INTEGRATED
   num += gated_url_models_.size();
   num += gated_url_match_models_.size();
+#endif
   num += byte_model_->NumOutputs();
   num += byte_mixer_->NumOutputs();
   return num;
@@ -190,7 +192,7 @@ void Predictor::AddUrl() {
   gated_url_match_models_.emplace_back(
       manager_.url_context_.ActiveGate(), manager_.history_,
       manager_.url_context_.MatchContext(), manager_.bit_context_, 192, 0.5,
-      1000000, &manager_.longest_match_, &manager_.history_pos_);
+      1000000, &manager_.url_longest_match_, &manager_.history_pos_);
 #endif
 }
 
@@ -241,7 +243,7 @@ void Predictor::AddMixers() {
   AddMixer(0, manager_.numeric_sequence_.BoundaryMixerContext(), 0.005,
       &manager_.numeric_sequence_.BoundaryActive());
 #endif
-#if URL_ROLE_MIXER
+#if URL_INTEGRATED && URL_ROLE_MIXER
   AddMixer(0, manager_.url_context_.MixerContext(), 0.001,
       &manager_.url_context_.SyntaxGate());
 #endif
@@ -298,11 +300,21 @@ float Predictor::Predict() {
       ++input_index;
     }
   }
+  url_model_probabilities_.fill(0.5f);
+  url_model_probability_count_ = 0;
   for (auto& model : gated_url_match_models_) {
-    layers_[0].SetInput(input_index++, model.Predict()[0]);
+    const float output = model.Predict()[0];
+    url_model_probabilities_[url_model_probability_count_++] = output;
+#if URL_INTEGRATED
+    layers_[0].SetInput(input_index++, output);
+#endif
   }
   for (auto& model : gated_url_models_) {
-    layers_[0].SetInput(input_index++, model.Predict()[0]);
+    const float output = model.Predict()[0];
+    url_model_probabilities_[url_model_probability_count_++] = output;
+#if URL_INTEGRATED
+    layers_[0].SetInput(input_index++, output);
+#endif
   }
   numeric_model_probabilities_.fill(0.5f);
   unsigned int numeric_output_index = 0;
@@ -357,9 +369,17 @@ float Predictor::Predict() {
 
   float p = Sigmoid::Logistic(mixer_1_[0].Mix());
   p = sse_.Predict(p);
+  url_residual_used_ = false;
   if (byte_mixer_override >= 0) {
     return byte_mixer_override;
   }
+#if URL_SIDECAR
+  url_residual_used_ =
+      manager_.url_context_.State().confidence ==
+      UrlConfidence::UrlConfirmed;
+  p = url_residual_.Predict(p, url_model_probabilities_,
+      url_model_probability_count_, manager_.url_context_.State(), sigmoid_);
+#endif
   return p;
 }
 
@@ -400,6 +420,9 @@ void Predictor::Perceive(int bit) {
   }
 
   sse_.Perceive(bit);
+#if URL_SIDECAR
+  if (url_residual_used_) url_residual_.Perceive(bit);
+#endif
 
   bool byte_update = false;
   if (manager_.bit_context_ >= 128) byte_update = true;
