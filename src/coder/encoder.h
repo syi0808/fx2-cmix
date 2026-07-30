@@ -6,12 +6,9 @@
 
 #include "../predictor.h"
 
-struct NumericTrace;
-
 class Encoder {
  public:
   Encoder(std::ofstream* os, Predictor* p);
-  ~Encoder();
   void Encode(int bit);
   void Flush();
   size_t OutputSize() { return out_.size();}
@@ -23,6 +20,5 @@ class Encoder {
   std::ofstream* os_;
   unsigned int x1_, x2_;
   Predictor* p_;
-  NumericTrace* numeric_trace_;
 };
 #endif

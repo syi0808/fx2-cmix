@@ -126,30 +126,6 @@ Must run below 70000/T h. T=1026.
 # Instructions
 The installation and usage instructions for fx2-cmix are the same as for fast-cmix.
 
-## Numeric model experiments
-
-Build the baseline with `-DNUMERIC_LOCAL_MODEL=0` and the E1 numeric context
-model with `-DNUMERIC_LOCAL_MODEL=1` in `CFLAGS_DEFINES`.
-
-The compression runner accepts these experiment environment variables:
-
-* `FX2_KEEP_TEMP=1` preserves the Predictor input (`<output>.cmix.temp`) and
-  decompression temp files.
-* `FX2_INPUT_LIMIT=<bytes>` truncates the final Predictor input before coding.
-* `FX2_NUMERIC_TRACE=<path>` writes aggregate JSON surprisal statistics using
-  the same quantized 16-bit probabilities passed to the range coder.
-
-`cmix -r .dict predictor-input.bin output.cmix` bypasses preprocessing while
-retaining dictionary pretraining. This produces benchmark payloads for an
-already captured Predictor stream; it is not a general-purpose archive mode.
-
-Run `scripts/bench_numeric.sh [fixture]` for a baseline/E1 fixture comparison,
-or compare existing traces with:
-
-```
-tools/analyze_numeric_trace.py baseline.json numeric-local.json
-```
-
 One important note: it is recommended to change one variable in the source code for PPM. From line 26 in src/models/ppmd.cpp:
 
 ```

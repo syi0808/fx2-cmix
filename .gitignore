@@ -1,5 +1,4 @@
-scripts/*
-!scripts/bench_numeric.sh
+scripts/
 cmix
 remap
 pgo_data/
