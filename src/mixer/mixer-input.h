@@ -20,6 +20,8 @@ class MixerInput {
   void SetExtraInputSize(size_t size) { extra_inputs_.resize(size);};
   //void ClearExtraInputs() { extra_inputs_.clear(); }
   const std::valarray<float>& Inputs() const { return inputs_; }
+  float* MutableInputs() { return std::begin(inputs_); }
+  const float* Input12BitTable() const { return input_12_bit_.data(); }
   //const std::vector<float>& ExtraInputs() const { return extra_inputs_; }
   const auto& ExtraInputs() const { return extra_inputs_; }
 

@@ -19,7 +19,7 @@ public:
 class FXCM : public Model {
  public:
   FXCM();
-  const std::valarray<uint16_t>& Predict() const;
+  void SetMixerInput(float* inputs, const float* input_12_bit);
   unsigned int NumOutputs();
   void Perceive(int bit);
   void ByteUpdate() {};

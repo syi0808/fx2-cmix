@@ -91,12 +91,13 @@ inline int max(int a, int b) {return a<b?b:a;}
 #endif
 
 int num_models = 439+1-2-7;
-std::valarray<uint16_t> model_predictions(uint16_t{4096}, num_models);
+float* mixer_inputs = nullptr;
+const float* input_12_bit = nullptr;
 unsigned int prediction_index = 0;
 
 void AddPrediction(int x) {
     assert(prediction_index >= 0 && prediction_index < num_models);
-    model_predictions[prediction_index++] = x;
+    mixer_inputs[prediction_index++] = input_12_bit[x];
 }
 
 void ResetPredictions() {
@@ -4808,12 +4809,14 @@ FXCM::FXCM() {
     predictor_.reset(new fxcmv1::Predictor());
 }
 
-const std::valarray<uint16_t>& FXCM::Predict() const{
-    return fxcmv1::model_predictions;
+void FXCM::SetMixerInput(float* inputs, const float* input_12_bit) {
+    fxcmv1::mixer_inputs = inputs;
+    fxcmv1::input_12_bit = input_12_bit;
+    std::fill_n(inputs, fxcmv1::num_models, input_12_bit[4096]);
 }
 
 unsigned int FXCM::NumOutputs() {
-    return fxcmv1::model_predictions.size();
+    return fxcmv1::num_models;
 }
 
 void FXCM::Perceive(int bit) {

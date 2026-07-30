@@ -170,6 +170,8 @@ void Predictor::AddMixers() {
   AddMixer(1,manager_.zero_context_, 0.0003);
 
   layers_[0].SetExtraInputSize(mixer_0_.size());
+  fxcm_model_.SetMixerInput(layers_[0].MutableInputs() + 1,
+      layers_[0].Input12BitTable());
 
 }
 int lstmpr=0, lstmex=0;
@@ -179,11 +181,7 @@ float Predictor::Predict() {
   auto bracket_model_output = bracket_model_->Predict()[0];
   layers_[0].SetInput(input_index++, bracket_model_output);
 
-  const auto& fxcm_model_outputs = fxcm_model_.Predict();
-  for (unsigned int j = 0; j < fxcm_model_outputs.size(); ++j) {
-    layers_[0].SetInputFrom12Bit(input_index, fxcm_model_outputs[j]);
-    ++input_index;
-  }
+  input_index += fxcm_model_.NumOutputs();
   auto fxcm_model_index = input_index - 1;
   
 
@@ -315,7 +313,6 @@ void Predictor::Perceive(int bit) {
 
 void Predictor::Pretrain(int bit) {
   bracket_model_->Predict();
-  fxcm_model_.Predict();
     
   for (unsigned int i = 0; i < direct_models_.size(); ++i) {
     direct_models_[i].Predict();
