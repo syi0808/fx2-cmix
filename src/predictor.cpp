@@ -2,73 +2,7 @@
 #include <vector>
 #include <stdlib.h>
 #include <stdio.h>
-#include <algorithm>
 #include <cstdlib>
-#include <cmath>
-
-#if LATENT_TOPIC_SHADOW_EVAL
-TopicShadowBranch::TopicShadowBranch(const Sigmoid& sigmoid,
-    const std::valarray<float>& model_inputs,
-    const unsigned long long& zero_context, size_t base_mixer_count,
-    unsigned int mask)
-    : mask_(mask), base_mixer_count_(base_mixer_count),
-      extra_layer_(sigmoid, 1.0e-4),
-      top_layer_(sigmoid, 1.0e-4) {
-  extra_layer_.SetExtraInputSize(base_mixer_count_ + 3);
-  unsigned int topic_count = ((mask & 1) != 0) + ((mask & 2) != 0)
-      + ((mask & 4) != 0);
-  top_layer_.SetNumModels(base_mixer_count_ + topic_count + 2);
-  if (mask & 1) {
-    topic_mixers_.emplace_back(new Mixer(model_inputs,
-        extra_layer_.ExtraInputs(), coarse_topic_, 0.0005,
-        base_mixer_count_ + topic_mixers_.size()));
-  }
-  if (mask & 2) {
-    topic_mixers_.emplace_back(new Mixer(model_inputs,
-        extra_layer_.ExtraInputs(), mid_topic_, 0.0003,
-        base_mixer_count_ + topic_mixers_.size()));
-  }
-  if (mask & 4) {
-    topic_mixers_.emplace_back(new Mixer(model_inputs,
-        extra_layer_.ExtraInputs(), fine_topic_, 0.0002,
-        base_mixer_count_ + topic_mixers_.size()));
-  }
-  top_mixer_.reset(new Mixer(top_layer_.Inputs(), top_layer_.ExtraInputs(),
-      zero_context, 0.0003, 0));
-}
-
-void TopicShadowBranch::SetBaseOutput(size_t index, float prediction) {
-  extra_layer_.SetExtraInput(index, prediction);
-  top_layer_.SetStretchedInput(index, prediction);
-}
-
-void TopicShadowBranch::Predict(uint32_t article_index, float fxcm_input,
-    float byte_mixer_input, float override_prediction) {
-  coarse_topic_ = article_index >> LATENT_TOPIC_COARSE_SHIFT;
-  mid_topic_ = article_index >> LATENT_TOPIC_MID_SHIFT;
-  fine_topic_ = article_index >> LATENT_TOPIC_FINE_SHIFT;
-  size_t input_index = base_mixer_count_;
-  for (auto& mixer : topic_mixers_) {
-    float prediction = mixer->Mix();
-    extra_layer_.SetExtraInput(input_index, prediction);
-    top_layer_.SetStretchedInput(input_index, prediction);
-    ++input_index;
-  }
-  top_layer_.SetStretchedInput(input_index++, fxcm_input);
-  top_layer_.SetStretchedInput(input_index, byte_mixer_input);
-  prediction_ = Sigmoid::Logistic(top_mixer_->Mix());
-  if (override_prediction >= 0) prediction_ = override_prediction;
-}
-
-void TopicShadowBranch::Perceive(int bit) {
-  double probability = bit ? prediction_ : 1.0 - prediction_;
-  probability = std::max(probability, 1.0e-12);
-  loss_bits_ -= std::log2(probability);
-  ++bits_;
-  for (auto& mixer : topic_mixers_) mixer->Perceive(bit);
-  top_mixer_->Perceive(bit);
-}
-#endif
 
 Predictor::Predictor(const std::vector<bool>& vocab) : manager_(),
     sigmoid_(100001), vocab_(vocab) {
@@ -78,36 +12,8 @@ Predictor::Predictor(const std::vector<bool>& vocab) : manager_(),
   AddMatch();
   AddDoubleIndirect();
   AddMixers();
-#if LATENT_TOPIC_SHADOW_EVAL
-  AddShadowBranches();
-#endif
   auxiliary_size_ = 2;
 }
-
-#if LATENT_TOPIC_SHADOW_EVAL
-Predictor::~Predictor() {
-  const double baseline_loss = shadow_branches_.empty()
-      ? 0.0 : shadow_branches_.front()->loss_bits_;
-  for (const auto& branch : shadow_branches_) {
-    const double bits_per_bit = branch->bits_ == 0
-        ? 0.0 : branch->loss_bits_ / branch->bits_;
-    fprintf(stderr,
-        "\ntopic-shadow mask=%u bits=%llu pre_sse_loss_bits=%.3f "
-        "pre_sse_bytes=%.3f delta_bytes=%.3f bpb=%.9f articles=%u\n",
-        branch->mask_, branch->bits_, branch->loss_bits_,
-        branch->loss_bits_ / 8.0,
-        (branch->loss_bits_ - baseline_loss) / 8.0, bits_per_bit,
-        article_index_);
-  }
-}
-
-void Predictor::AddShadowBranches() {
-  for (unsigned int mask : {0, 1, 2, 4, 7}) {
-    shadow_branches_.emplace_back(new TopicShadowBranch(sigmoid_,
-        layers_[0].Inputs(), manager_.zero_context_, mixer_0_.size(), mask));
-  }
-}
-#endif
 
 unsigned long long Predictor::GetNumModels() {
   unsigned long long num = 0;
@@ -217,21 +123,6 @@ void Predictor::AddDoubleIndirect() {
 unsigned int Discretize(float p) {
   return 1 + 4094 * p;
 }
-#if LATENT_TOPIC_CONTEXT
-void Predictor::UpdateLatentTopics() {
-  coarse_topic_ = article_index_ >> LATENT_TOPIC_COARSE_SHIFT;
-  mid_topic_ = article_index_ >> LATENT_TOPIC_MID_SHIFT;
-  fine_topic_ = article_index_ >> LATENT_TOPIC_FINE_SHIFT;
-}
-#endif
-#if LATENT_TOPIC_CONTEXT || LATENT_TOPIC_SHADOW_EVAL
-void Predictor::UpdateArticleIndex(unsigned char byte) {
-  constexpr unsigned long long kPageEnd = 0x3c2f706167653eULL;
-  constexpr unsigned long long kPageEndMask = 0x00ffffffffffffffULL;
-  article_tail_ = (article_tail_ << 8) | byte;
-  if ((article_tail_ & kPageEndMask) == kPageEnd) ++article_index_;
-}
-#endif
 void Predictor::AddMixers() {
   unsigned int vocab_size = 0;
   for (unsigned int i = 0; i < vocab_.size(); ++i) {
@@ -272,15 +163,6 @@ void Predictor::AddMixers() {
   AddMixer(0, manager_.mx16, 0.005);
   AddMixer(0, manager_.mx14, 0.005);
   AddMixer(0, manager_.mx15, 0.005);
-#if LATENT_TOPIC_CONTEXT & 1
-  AddMixer(0, coarse_topic_, 0.0005);
-#endif
-#if LATENT_TOPIC_CONTEXT & 2
-  AddMixer(0, mid_topic_, 0.0003);
-#endif
-#if LATENT_TOPIC_CONTEXT & 4
-  AddMixer(0, fine_topic_, 0.0002);
-#endif
 
   input_size = mixer_0_.size() + auxiliary_size_;
   layers_[1].SetNumModels(input_size);
@@ -293,9 +175,6 @@ void Predictor::AddMixers() {
 int lstmpr=0, lstmex=0;
 float byte_mixer_output=0.0f;
 float Predictor::Predict() {
-#if LATENT_TOPIC_CONTEXT
-  UpdateLatentTopics();
-#endif
   unsigned int input_index = 0;
   auto bracket_model_output = bracket_model_->Predict()[0];
   layers_[0].SetInput(input_index++, bracket_model_output);
@@ -355,22 +234,12 @@ float Predictor::Predict() {
     float p = mixer_0_[i].Mix();
     layers_[0].SetExtraInput(i, p);
     layers_[1].SetStretchedInput(i, p);
-#if LATENT_TOPIC_SHADOW_EVAL
-    for (auto& branch : shadow_branches_) branch->SetBaseOutput(i, p);
-#endif
   }
   layers_[1].SetStretchedInput(mixer_0_.size(), layers_[0].Inputs()[fxcm_model_index]);
   layers_[1].SetStretchedInput(mixer_0_.size() + 1, layers_[0].Inputs()[byte_mixer_index]);
 
   float p = Sigmoid::Logistic(mixer_1_[0].Mix());
   p = sse_.Predict(p);
-#if LATENT_TOPIC_SHADOW_EVAL
-  for (auto& branch : shadow_branches_) {
-    branch->Predict(article_index_,
-        layers_[0].Inputs()[fxcm_model_index],
-        layers_[0].Inputs()[byte_mixer_index], byte_mixer_override);
-  }
-#endif
   if (byte_mixer_override >= 0) {
     return byte_mixer_override;
   }
@@ -405,18 +274,12 @@ void Predictor::Perceive(int bit) {
   }
 
   sse_.Perceive(bit);
-#if LATENT_TOPIC_SHADOW_EVAL
-  for (auto& branch : shadow_branches_) branch->Perceive(bit);
-#endif
 
   bool byte_update = false;
   if (manager_.bit_context_ >= 128) byte_update = true;
 
   manager_.UpdateContexts(bit);
   if (byte_update) {
-#if LATENT_TOPIC_CONTEXT || LATENT_TOPIC_SHADOW_EVAL
-    UpdateArticleIndex(manager_.bit_context_);
-#endif
     bracket_model_->ByteUpdate();
 
     for (unsigned int i = 0; i < direct_models_.size(); ++i) {

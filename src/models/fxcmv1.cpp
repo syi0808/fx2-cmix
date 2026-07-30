@@ -84,6 +84,7 @@ unsigned long long wrtcxt=0;
 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7};
 namespace fxcmv1 {
 
+
 #ifndef min
 inline int min(int a, int b) {return a<b?a:b;}
 inline int max(int a, int b) {return a<b?b:a;}

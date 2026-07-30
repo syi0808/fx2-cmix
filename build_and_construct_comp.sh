@@ -5,13 +5,12 @@
 
 SEED="923"
 UPDATE_LIMIT="3000"
-LATENT_TOPIC_CONTEXT="${LATENT_TOPIC_CONTEXT:-0}"
 
 rm -rf pgo_data 
 mkdir -p pgo_data 
 
 # building with PGO
-CFLAGS_DEFINES="-DSEED=$SEED -DUPDATE_LIMIT=$UPDATE_LIMIT -DLATENT_TOPIC_CONTEXT=$LATENT_TOPIC_CONTEXT"
+CFLAGS_DEFINES="-DSEED=$SEED -DUPDATE_LIMIT=$UPDATE_LIMIT"
 make CFLAGS_DEFINES="$CFLAGS_DEFINES" prof_gen -j 
 
 ./cmix -c ./prof_input/input ./prof_comp > ./prof_output

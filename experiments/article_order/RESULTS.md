@@ -84,3 +84,7 @@ measured gain is too small to cover extra code and memory confidently. The
 result is directional rather than a proof because pages are truncated, topic
 blocks are scaled down, preprocessing is disabled, and shadow loss excludes
 SSE.
+
+The latent-topic and shadow-evaluation paths were removed from the production
+compressor after this rejection. The mini-corpus generator and these results
+remain only for reproducibility.
