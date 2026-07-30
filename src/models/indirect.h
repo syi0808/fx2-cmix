@@ -6,6 +6,7 @@
 
 #include <vector>
 #include <array>
+#include <cstdint>
 #include <stdlib.h>
 
 template<typename StateType>
@@ -15,6 +16,10 @@ class Indirect : public Model {
       const unsigned long long& byte_context,
       const unsigned int& bit_context, float delta,
       std::vector<unsigned char>& map);
+  Indirect(const StateType& state,
+      const unsigned long long& byte_context,
+      const unsigned int& bit_context, float delta,
+      std::vector<unsigned char>& map, uint32_t fixed_offset);
   const std::valarray<float>& Predict() const;
   void Perceive(int bit);
   void ByteUpdate();
@@ -44,6 +49,19 @@ Indirect<StateType>::Indirect(const StateType& state,
 }
 
 template<typename StateType>
+Indirect<StateType>::Indirect(const StateType& state,
+    const unsigned long long& byte_context,
+    const unsigned int& bit_context, float delta,
+    std::vector<unsigned char>& map, uint32_t fixed_offset)
+    : byte_context_(byte_context), bit_context_(bit_context), map_index_(0),
+      map_offset_(fixed_offset % (map.size() - 257)),
+      divisor_(1.0 / delta), state_(state), map_(map) {
+  for (int i = 0; i < 256; ++i) {
+    predictions_[i] = state_.InitProbability(i);
+  }
+}
+
+template<typename StateType>
 const std::valarray<float>& Indirect<StateType>::Predict() const {
   outputs_[0] = predictions_[map_[map_index_ + bit_context_]];
   return outputs_;
@@ -65,4 +83,3 @@ void Indirect<StateType>::ByteUpdate() {
 
 
 #endif
-

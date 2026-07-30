@@ -56,7 +56,9 @@ const unsigned char wrt_4b[256]={
 #define CURLYCLOSE    'R' // }
 
 ContextManager::ContextManager() : history_(60000000, 0),
-    shared_map_(256*400000, 0), words_(8, 0), recent_bytes_(8, 0) {
+    shared_map_(256*400000, 0), numeric_boundary_map_(1 << 20, 0),
+    numeric_linked_map_(1 << 20, 0), numeric_start_map_(2 << 20, 0),
+    words_(8, 0), recent_bytes_(8, 0) {
     hashes_ind1.resize(0x1000000, 0);
     hashes_ind2.resize(0x1000000, 0);
     hashes_ind3.resize(0x2000000, 0);
@@ -184,6 +186,8 @@ void ContextManager::UpdateContexts(int bit) {
     UpdateWords();
     UpdateRecentBytes();
     UpdateWRTContext();
+    numeric_sequence_.Update(static_cast<uint8_t>(bit_context_), words_[2],
+        wrt_context_, b3stream, static_cast<uint8_t>(line_break_));
 
     for (auto& context : context_hash_contexts_) {
       context.Update();

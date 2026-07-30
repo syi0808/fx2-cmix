@@ -13,6 +13,7 @@
 #include "contexts/interval-hash.h"
 #include "contexts/indirect-hash.h"
 #include "contexts/sparse.h"
+#include "contexts/numeric-sequence-context.h"
 
 #include <cmath>
 #include "ds/SmallVector.h"
@@ -87,6 +88,8 @@ struct ContextManager {
       ind5=0,context1_ind5=0,
       mx19cxt=0;
   std::vector<unsigned char> history_, shared_map_;
+  std::vector<unsigned char> numeric_boundary_map_, numeric_linked_map_,
+      numeric_start_map_;
   std::vector<unsigned long long> words_, recent_bytes_;
   llvm::SmallVector<ContextHash, 12> context_hash_contexts_;
   llvm::SmallVector<Sparse, 18> sparse_contexts_;
@@ -95,6 +98,7 @@ struct ContextManager {
   std::vector<uint32_t> hashes_ind2, hashes_ind3, hashes_ind5;
   RunMap run_map_;
   Nonstationary nonstationary_;
+  NumericSequenceContext numeric_sequence_;
 };
 
 #endif

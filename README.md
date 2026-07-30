@@ -187,3 +187,43 @@ Cmix decompression finished
 
 110111245 bytes -> 934220400 bytes in 229670.44 s.
 ```
+
+# Numeric structure experiments
+
+Generate the fully preprocessed Predictor stream without starting arithmetic
+coding:
+
+```bash
+FX2_PREPROCESS_ONLY=1 ./cmix -c dictionary/english.dic input.xml predictor
+./tools/analyze_numeric_shapes.py predictor.cmix.temp
+```
+
+`analyze_numeric_shapes.py` restores the WRT punctuation symbols for display
+and reports numeric run lengths, linked shapes, adjacent symbols, separators,
+and previous tokens.
+
+Numeric models are disabled by default. Build-time ablations use these flags:
+
+```text
+NUMERIC_BOUNDARY_MODEL
+NUMERIC_BOUNDARY_SEMANTIC
+NUMERIC_LINKED_MODEL
+NUMERIC_LINKED_SHAPE
+NUMERIC_START_MODEL
+NUMERIC_FIELD_MODEL
+```
+
+Run B0/B1/B2/L1/L2/S1/F1 on an existing Predictor stream:
+
+```bash
+INPUT_LIMIT=1048576 \
+  ./scripts/bench_numeric_structure.sh predictor.cmix.temp \
+  dictionary/english.dic
+```
+
+Set `FX2_NUMERIC_TRACE=trace.json` during compression to record event-level
+final and standalone model loss. Compare traces with
+`tools/analyze_numeric_trace.py`. `FX2_INPUT_LIMIT` limits the copied Predictor
+stream used by the benchmark, and `FX2_KEEP_TEMP=1` retains ordinary temporary
+streams. Set `PRETRAIN=0` on the benchmark script only for quick smoke runs
+that intentionally omit dictionary pretraining.

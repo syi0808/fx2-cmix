@@ -5,6 +5,7 @@
 #include <vector>
 #include <string.h>
 #include <sys/stat.h>
+#include <unistd.h>
 
 #include "preprocess/preprocessor.h"
 #include "coder/encoder.h"
@@ -23,6 +24,23 @@
 
 namespace {
   const int kMinVocabFileSize = 10000;
+
+  bool EnvironmentEnabled(const char* name) {
+    const char* value = getenv(name);
+    return value && value[0] && strcmp(value, "0") != 0;
+  }
+
+  unsigned long long InputLimit() {
+    const char* value = getenv("FX2_INPUT_LIMIT");
+    if (!value || !value[0]) return 0;
+    char* end = NULL;
+    const unsigned long long limit = strtoull(value, &end, 10);
+    if (*end != '\0') {
+      fprintf(stderr, "invalid FX2_INPUT_LIMIT: %s\n", value);
+      exit(2);
+    }
+    return limit;
+  }
 }
 
 int Help() {
@@ -33,6 +51,7 @@ int Help() {
   printf("    with dictionary:    cmix -c [dictionary] [input] [output]\n");
   printf("    without dictionary: cmix -c [input] [output]\n");
   printf("    no preprocessing:   cmix -n [input] [output]\n");
+  printf("    raw predictor input: cmix -r [dictionary] [input] [output]\n");
   printf("    only preprocessing: cmix -s [dictionary] [input] [output]\n");
   printf("                        cmix -s [input] [output]\n");
   printf("Decompress:\n");
@@ -161,6 +180,7 @@ void Compress(unsigned long long input_bytes, std::ifstream* is,
   e.Flush();
   *output_bytes = os->tellp();
   delete [] buffer;
+  fclose(progress);
 }
 
 void Decompress(unsigned long long output_length, std::ifstream* is,
@@ -206,7 +226,7 @@ bool Store(const std::string& input_path, const std::string& temp_path,
 bool RunCompression(bool enable_preprocess, const std::string& input_path,
     const std::string& temp_path, const std::string& output_path,
     FILE* dictionary, unsigned long long* input_bytes,
-    unsigned long long* output_bytes) {
+    unsigned long long* output_bytes, bool raw_predictor_input = false) {
   FILE* data_in = fopen(input_path.c_str(), "rb");
   if (!data_in) return false;
   FILE* temp_out = fopen(temp_path.c_str(), "wb");
@@ -221,6 +241,21 @@ bool RunCompression(bool enable_preprocess, const std::string& input_path,
     fflush(stderr);
     preprocessor::Encode(data_in, temp_out, *input_bytes, temp_path,
         dictionary);
+  } else if (raw_predictor_input) {
+    const size_t buffer_size = 256 * 1024;
+    std::vector<char> buffer(buffer_size);
+    unsigned long long bytes_remaining = InputLimit();
+    size_t bytes_read = 0;
+    while ((bytes_read = fread(buffer.data(), 1,
+            bytes_remaining
+                ? std::min<unsigned long long>(buffer.size(), bytes_remaining)
+                : buffer.size(), data_in)) > 0) {
+      fwrite(buffer.data(), 1, bytes_read, temp_out);
+      if (bytes_remaining) {
+        bytes_remaining -= bytes_read;
+        if (!bytes_remaining) break;
+      }
+    }
   } else {
     preprocessor::NoPreprocess(data_in, temp_out, *input_bytes);
   }
@@ -230,12 +265,30 @@ bool RunCompression(bool enable_preprocess, const std::string& input_path,
   std::ifstream temp_in(temp_path, std::ios::in | std::ios::binary);
   if (!temp_in.is_open()) return false;
 
-  std::ofstream data_out(output_path, std::ios::out | std::ios::binary);
-  if (!data_out.is_open()) return false;
-
   temp_in.seekg(0, std::ios::end);
   unsigned long long temp_bytes = temp_in.tellg();
   temp_in.seekg(0, std::ios::beg);
+  if (EnvironmentEnabled("FX2_PREPROCESS_ONLY")) {
+    *output_bytes = temp_bytes;
+    fprintf(stderr, "\nPredictor input written to %s (%llu bytes)\n",
+        temp_path.c_str(), temp_bytes);
+    return true;
+  }
+
+  const unsigned long long input_limit = InputLimit();
+  if (input_limit && input_limit < temp_bytes) {
+    temp_in.close();
+    if (truncate(temp_path.c_str(), input_limit) != 0) {
+      fprintf(stderr, "can't limit Predictor input\n");
+      return false;
+    }
+    temp_in.open(temp_path, std::ios::in | std::ios::binary);
+    temp_bytes = input_limit;
+    fprintf(stderr, "\nPredictor input limited to %llu bytes\n", temp_bytes);
+  }
+
+  std::ofstream data_out(output_path, std::ios::out | std::ios::binary);
+  if (!data_out.is_open()) return false;
 
   std::vector<bool> vocab(256, false);
   if (temp_bytes < kMinVocabFileSize) {
@@ -247,11 +300,13 @@ bool RunCompression(bool enable_preprocess, const std::string& input_path,
 
   WriteHeader(temp_bytes, vocab, dictionary != NULL, &data_out);
   Predictor p(vocab);
-  if (enable_preprocess) preprocessor::Pretrain(&p, dictionary);
+  if (dictionary && !EnvironmentEnabled("FX2_SKIP_PRETRAIN")) {
+    preprocessor::Pretrain(&p, dictionary);
+  }
   Compress(temp_bytes, &temp_in, &data_out, output_bytes, &p);
   temp_in.close();
   data_out.close();
-  remove(temp_path.c_str());
+  if (!EnvironmentEnabled("FX2_KEEP_TEMP")) remove(temp_path.c_str());
   return true;
 }
 
@@ -307,14 +362,19 @@ bool RunDecompression(const std::string& input_path,
   *output_bytes = ftell(data_out);
   fclose(temp_in);
   fclose(data_out);
-  remove(temp_path.c_str());
+  if (!EnvironmentEnabled("FX2_KEEP_TEMP")) remove(temp_path.c_str());
   return true;
 }
 
 int main(int argc, char** argv) {
-  if ((argc != 1) && (argv[1][1] != 'h') && (argc < 4 || argc > 5 || strlen(argv[1]) != 2 || argv[1][0] != '-' ||
-      (argv[1][1] != 'c' && argv[1][1] != 'd' && argv[1][1] != 'x' && argv[1][1] != 's' &&
-      argv[1][1] != 'n' && argv[1][1] != 'e' ))) {
+  if (((argc != 1) && (argv[1][1] != 'h') &&
+      (argc < 4 || argc > 5 || strlen(argv[1]) != 2 ||
+       argv[1][0] != '-' ||
+       (argv[1][1] != 'c' && argv[1][1] != 'd' &&
+        argv[1][1] != 'x' && argv[1][1] != 's' &&
+        argv[1][1] != 'n' && argv[1][1] != 'r' &&
+        argv[1][1] != 'e'))) ||
+      (argc > 1 && argv[1][1] == 'r' && argc != 5)) {
     return Help();
   }
    srand(SEED);
@@ -328,7 +388,7 @@ int main(int argc, char** argv) {
 
 
   if ((argc > 1) && (argv[1][1] != 'h'))  {
-    if (argv[1][1] == 'n') enable_preprocess = false;
+    if (argv[1][1] == 'n' || argv[1][1] == 'r') enable_preprocess = false;
     input_path = argv[2];
     output_path = argv[3];
     if (argc == 5) {
@@ -381,10 +441,11 @@ int main(int argc, char** argv) {
         &output_bytes)) {
       return Help();
     }
-  } else if (argv[1][1] == 'c' || argv[1][1] == 'n') {
-      remove(".dict");
+  } else if (argv[1][1] == 'c' || argv[1][1] == 'n' ||
+      argv[1][1] == 'r') {
+    if (argv[1][1] != 'r') remove(".dict");
     if (!RunCompression(enable_preprocess, input_path, temp_path, output_path,
-        dictionary, &input_bytes, &output_bytes)) {
+        dictionary, &input_bytes, &output_bytes, argv[1][1] == 'r')) {
       return Help();
     }
   } else if (argv[1][1] == 'e') {
@@ -415,6 +476,7 @@ int main(int argc, char** argv) {
         dictionary, &input_bytes, &output_bytes)) {
       return Help();
     }
+    if (EnvironmentEnabled("FX2_PREPROCESS_ONLY")) goto print_end_message;
 
     // construct a selfextracting decompressor binary
     // archive9 = decomp_binary(upxed) + comp_dict + cmix_output + header.dat
@@ -471,4 +533,3 @@ print_end_message:
 exit:
   return 0;
 }
-

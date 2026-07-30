@@ -11,6 +11,9 @@ Predictor::Predictor(const std::vector<bool>& vocab) : manager_(),
   AddWord();
   AddMatch();
   AddDoubleIndirect();
+  AddNumericBoundary();
+  AddNumericLinked();
+  AddNumericStart();
   AddMixers();
   auxiliary_size_ = 2;
 }
@@ -25,6 +28,7 @@ unsigned long long Predictor::GetNumModels() {
   num += match_models_.size();
   num += indirect_ns_models_.size();
   num += indirect_r_models_.size();
+  num += conditional_numeric_models_.size();
   num += byte_model_->NumOutputs();
   num += byte_mixer_->NumOutputs();
   return num;
@@ -120,6 +124,40 @@ void Predictor::AddDoubleIndirect() {
   indirect_ns_models_.emplace_back(manager_.nonstationary_, manager_.ind3,  manager_.bit_context_, delta, manager_.shared_map_);
   indirect_ns_models_.emplace_back(manager_.nonstationary_, manager_.ind5,  manager_.bit_context_, delta, manager_.shared_map_);
 }
+
+void Predictor::AddNumericBoundary() {
+#if NUMERIC_BOUNDARY_MODEL
+  conditional_numeric_models_.emplace_back(
+      manager_.numeric_sequence_.BoundaryActive(), manager_.nonstationary_,
+      manager_.numeric_sequence_.BoundaryContext(), manager_.bit_context_, 200,
+      manager_.numeric_boundary_map_, 0x13579);
+#endif
+}
+
+void Predictor::AddNumericLinked() {
+#if NUMERIC_LINKED_MODEL
+  conditional_numeric_models_.emplace_back(
+      manager_.numeric_sequence_.LinkedActive(), manager_.nonstationary_,
+      manager_.numeric_sequence_.LinkedContext(), manager_.bit_context_, 200,
+      manager_.numeric_linked_map_, 0x2468a);
+#endif
+}
+
+void Predictor::AddNumericStart() {
+#if NUMERIC_START_MODEL
+  conditional_numeric_models_.emplace_back(
+      manager_.numeric_sequence_.StartActive(), manager_.nonstationary_,
+      manager_.numeric_sequence_.StartCoarseContext(), manager_.bit_context_,
+      200, manager_.numeric_start_map_, 0x3579b);
+#endif
+#if NUMERIC_FIELD_MODEL
+  conditional_numeric_models_.emplace_back(
+      manager_.numeric_sequence_.StartActive(), manager_.nonstationary_,
+      manager_.numeric_sequence_.StartFieldContext(), manager_.bit_context_,
+      200, manager_.numeric_start_map_, (1 << 20) + 0x468ac);
+#endif
+}
+
 unsigned int Discretize(float p) {
   return 1 + 4094 * p;
 }
@@ -209,12 +247,43 @@ float Predictor::Predict() {
     }
   }
  
- for (unsigned int i = 0; i < indirect_r_models_.size(); ++i) {
+  for (unsigned int i = 0; i < indirect_r_models_.size(); ++i) {
     const std::valarray<float>& outputs = indirect_r_models_[i].Predict();
     for (unsigned int j = 0; j < outputs.size(); ++j) {
       layers_[0].SetInput(input_index, outputs[j]);
       ++input_index;
     }
+  }
+  numeric_model_probabilities_.fill(0.5f);
+  unsigned int numeric_output_index = 0;
+  for (unsigned int i = 0; i < conditional_numeric_models_.size(); ++i) {
+    const float output = conditional_numeric_models_[i].Predict()[0];
+    layers_[0].SetInput(input_index++, output);
+#if NUMERIC_BOUNDARY_MODEL
+    if (numeric_output_index == 0) numeric_model_probabilities_[0] = output;
+#endif
+#if NUMERIC_LINKED_MODEL
+    if (numeric_output_index ==
+        static_cast<unsigned int>(NUMERIC_BOUNDARY_MODEL)) {
+      numeric_model_probabilities_[1] = output;
+    }
+#endif
+#if NUMERIC_START_MODEL
+    if (numeric_output_index ==
+        static_cast<unsigned int>(NUMERIC_BOUNDARY_MODEL +
+                                  NUMERIC_LINKED_MODEL)) {
+      numeric_model_probabilities_[2] = output;
+    }
+#endif
+#if NUMERIC_FIELD_MODEL
+    if (numeric_output_index ==
+        static_cast<unsigned int>(NUMERIC_BOUNDARY_MODEL +
+                                  NUMERIC_LINKED_MODEL +
+                                  NUMERIC_START_MODEL)) {
+      numeric_model_probabilities_[3] = output;
+    }
+#endif
+    ++numeric_output_index;
   }
   layers_[0].SetInput(input_index++, byte_model_->Predict()[0]);
 
@@ -259,6 +328,9 @@ void Predictor::Perceive(int bit) {
   for (unsigned int i = 0; i < indirect_r_models_.size(); ++i) {
     indirect_r_models_[i].Perceive(bit);
   }
+  for (auto& model : conditional_numeric_models_) {
+    model.Perceive(bit);
+  }
 
   byte_model_->Perceive(bit);
 
@@ -293,6 +365,9 @@ void Predictor::Perceive(int bit) {
     for (unsigned int i = 0; i < indirect_r_models_.size(); ++i) {
       indirect_r_models_[i].ByteUpdate();
     }
+    for (auto& model : conditional_numeric_models_) {
+      model.ByteUpdate();
+    }
 
     byte_model_->ByteUpdate();
 
@@ -326,6 +401,9 @@ void Predictor::Pretrain(int bit) {
   for (unsigned int i = 0; i < indirect_r_models_.size(); ++i) {
     indirect_r_models_[i].Predict();
   }
+  for (auto& model : conditional_numeric_models_) {
+    model.Predict();
+  }
 
 
   bracket_model_->Perceive(bit);
@@ -342,6 +420,9 @@ void Predictor::Pretrain(int bit) {
   }
   for (unsigned int i = 0; i < indirect_r_models_.size(); ++i) {
     indirect_r_models_[i].Perceive(bit);
+  }
+  for (auto& model : conditional_numeric_models_) {
+    model.Perceive(bit);
   }
 
 
@@ -362,6 +443,9 @@ void Predictor::Pretrain(int bit) {
     }
     for (unsigned int i = 0; i < indirect_r_models_.size(); ++i) {
       indirect_r_models_[i].ByteUpdate();
+    }
+    for (auto& model : conditional_numeric_models_) {
+      model.ByteUpdate();
     }
     manager_.bit_context_ = 1;
   }
