@@ -66,6 +66,10 @@ void NumericSequenceContext::Refresh(uint64_t previous_word,
 
   const uint64_t segment = std::min<uint8_t>(state_.segment_index, 3);
   boundary_context_ = RunLengthBucket(state_.current_run_length);
+  boundary_mixer_context_ = boundary_active_
+      ? RunLengthBucket(state_.current_run_length) * 8 +
+          state_.start_semantic_coarse
+      : 64;
 #if NUMERIC_BOUNDARY_SEMANTIC
   boundary_context_ = boundary_context_ * 8 + state_.start_semantic_coarse;
   boundary_context_ = boundary_context_ * 4 + segment;

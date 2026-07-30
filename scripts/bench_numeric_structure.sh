@@ -12,7 +12,7 @@ UPDATE_LIMIT="${UPDATE_LIMIT:-3000}"
 COMPILER="${COMPILER:-clang++-17}"
 MAKE_ARGS="${MAKE_ARGS:-}"
 LFLAGS_OVERRIDE="${LFLAGS_OVERRIDE:-}"
-VARIANTS="${VARIANTS:-B0 B1 B2 L1 L2 S1 F1}"
+VARIANTS="${VARIANTS:-B0 B1 B2 B2M L1 L2 S1 F1}"
 PRETRAIN="${PRETRAIN:-1}"
 
 mkdir -p "$RESULT_DIR"
@@ -22,6 +22,7 @@ definitions() {
     B0) echo "" ;;
     B1) echo "-DNUMERIC_BOUNDARY_MODEL=1" ;;
     B2) echo "-DNUMERIC_BOUNDARY_MODEL=1 -DNUMERIC_BOUNDARY_SEMANTIC=1" ;;
+    B2M) echo "-DNUMERIC_BOUNDARY_MODEL=1 -DNUMERIC_BOUNDARY_SEMANTIC=1 -DNUMERIC_BOUNDARY_MIXER=1" ;;
     L1) echo "-DNUMERIC_BOUNDARY_MODEL=1 -DNUMERIC_LINKED_MODEL=1" ;;
     L2) echo "-DNUMERIC_BOUNDARY_MODEL=1 -DNUMERIC_LINKED_MODEL=1 -DNUMERIC_LINKED_SHAPE=1" ;;
     S1) echo "-DNUMERIC_START_MODEL=1" ;;
@@ -48,6 +49,7 @@ for variant in $VARIANTS; do
   FX2_INPUT_LIMIT="$INPUT_LIMIT" \
   FX2_SKIP_PRETRAIN="$skip_pretrain" \
   FX2_NUMERIC_TRACE="$RESULT_DIR/$variant.trace.json" \
+  FX2_NUMERIC_PROB_TRACE="$RESULT_DIR/$variant.prob.bin" \
     "$RESULT_DIR/cmix-$variant" -r "$DICTIONARY" "$INPUT" \
     "$RESULT_DIR/$variant.cmix"
   end="$(date +%s)"
@@ -65,3 +67,12 @@ for variant in $VARIANTS; do
 done
 "$ROOT/tools/analyze_numeric_trace.py" "${traces[@]}" \
   | tee "$RESULT_DIR/trace-comparison.txt"
+
+if [[ -f "$RESULT_DIR/B0.prob.bin" && -f "$RESULT_DIR/B2.prob.bin" ]]; then
+  "$ROOT/tools/analyze_numeric_trace.py" \
+    "$RESULT_DIR/B0.trace.json" "$RESULT_DIR/B2.trace.json" \
+    --probability-traces \
+      "$RESULT_DIR/B0.prob.bin" "$RESULT_DIR/B2.prob.bin" \
+    --warmup-bytes "${WARMUP_BYTES:-0}" \
+    | tee "$RESULT_DIR/boundary-alpha-sweep.txt"
+fi

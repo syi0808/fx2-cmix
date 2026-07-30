@@ -100,7 +100,23 @@ void PrintMap(FILE* output, const char* name,
 }
 
 struct NumericTrace {
-  explicit NumericTrace(const char* path) : path_(path) {}
+  NumericTrace(const char* path, const char* probability_path)
+      : path_(path ? path : ""), probability_output_(nullptr) {
+    if (probability_path && probability_path[0]) {
+      probability_output_ = std::fopen(probability_path, "wb");
+      if (probability_output_) {
+        const char header[8] = {'F', 'X', '2', 'N', 'B', 'P', '1', 0};
+        std::fwrite(header, 1, sizeof(header), probability_output_);
+      } else {
+        std::fprintf(stderr, "\ncan't open numeric probability trace: %s\n",
+            probability_path);
+      }
+    }
+  }
+
+  ~NumericTrace() {
+    if (probability_output_) std::fclose(probability_output_);
+  }
 
   void AddBit(int bit, unsigned int final_probability,
       const std::array<float, 4>& model_probabilities,
@@ -110,6 +126,15 @@ struct NumericTrace {
     for (size_t index = 0; index < model_probabilities.size(); ++index) {
       byte_model_loss_[index] += BitLoss(bit, model_probabilities[index]);
     }
+    const size_t bit_index = bit_count_;
+    byte_final_probabilities_[bit_index] =
+        static_cast<uint16_t>(final_probability);
+    const float boundary_probability = std::max(
+        1.0f / 65536.0f,
+        std::min(65535.0f / 65536.0f, model_probabilities[0]));
+    byte_boundary_probabilities_[bit_index] =
+        static_cast<uint16_t>(boundary_probability * 65536.0f);
+    byte_bits_[bit_index] = static_cast<uint8_t>(bit);
     byte_ = static_cast<uint8_t>((byte_ << 1) | bit);
     byte_start_word_bucket_ = start_word_bucket;
     byte_start_wrt_bucket_ = start_wrt_bucket;
@@ -135,6 +160,8 @@ struct NumericTrace {
     const bool digit = byte_ >= '0' && byte_ <= '9';
     const bool previous_digit =
         previous_byte_ >= '0' && previous_byte_ <= '9';
+    Add(previous_digit ? "boundary_active" : "boundary_inactive");
+    if (previous_digit) WriteProbabilityByte(digit);
     if (digit) {
       Add("digit");
       if (previous_digit) {
@@ -201,9 +228,47 @@ struct NumericTrace {
       previous_structural_class_ = ClassifyStructural(byte_);
     }
     previous_byte_ = byte_;
+    ++byte_position_;
+  }
+
+  void WriteProbabilityByte(bool continued) {
+    if (!probability_output_) return;
+    uint8_t terminator = 0;
+    if (!continued) {
+      const std::string name = TerminatorName(byte_);
+      if (name == "whitespace") terminator = 1;
+      else if (name == "markup") terminator = 2;
+      else if (name == "dash") terminator = 3;
+      else if (name == "colon") terminator = 4;
+      else if (name == "dot") terminator = 5;
+      else if (name == "comma") terminator = 6;
+      else if (name == "slash") terminator = 7;
+      else terminator = 8;
+    }
+    for (uint8_t bit_index = 0; bit_index < 8; ++bit_index) {
+      std::array<uint8_t, 16> record = {};
+      for (int byte_index = 0; byte_index < 8; ++byte_index) {
+        record[byte_index] =
+            static_cast<uint8_t>(byte_position_ >> (8 * byte_index));
+      }
+      record[8] = static_cast<uint8_t>(
+          byte_final_probabilities_[bit_index]);
+      record[9] = static_cast<uint8_t>(
+          byte_final_probabilities_[bit_index] >> 8);
+      record[10] = static_cast<uint8_t>(
+          byte_boundary_probabilities_[bit_index]);
+      record[11] = static_cast<uint8_t>(
+          byte_boundary_probabilities_[bit_index] >> 8);
+      record[12] = bit_index;
+      record[13] = byte_bits_[bit_index];
+      record[14] = continued ? 1 : 2;
+      record[15] = terminator;
+      std::fwrite(record.data(), 1, record.size(), probability_output_);
+    }
   }
 
   void Write() const {
+    if (path_.empty()) return;
     FILE* output = std::fopen(path_.c_str(), "w");
     if (!output) {
       std::fprintf(stderr, "\ncan't open numeric trace: %s\n", path_.c_str());
@@ -234,7 +299,8 @@ struct NumericTrace {
 
   std::string path_;
   std::map<std::string, TraceBucket> events_ = {
-      {"all", {}}, {"continue_digit", {}}, {"digit", {}},
+      {"all", {}}, {"boundary_active", {}}, {"boundary_inactive", {}},
+      {"continue_digit", {}}, {"digit", {}},
       {"linked_run_start", {}}, {"non_numeric", {}},
       {"run_continued", {}}, {"run_ended", {}}, {"separator", {}},
       {"sequence_end", {}}, {"start_digit", {}}};
@@ -255,15 +321,22 @@ struct NumericTrace {
   StructuralClass start_structural_class_ = StructuralClass::Other;
   std::string linked_separator_;
   std::string shape_label_;
+  FILE* probability_output_;
+  uint64_t byte_position_ = 0;
   double byte_loss_ = 0;
   std::array<double, 4> byte_model_loss_ = {};
+  std::array<uint16_t, 8> byte_final_probabilities_ = {};
+  std::array<uint16_t, 8> byte_boundary_probabilities_ = {};
+  std::array<uint8_t, 8> byte_bits_ = {};
 };
 
 Encoder::Encoder(std::ofstream* os, Predictor* p) : os_(os), x1_(0),
     x2_(0xffffffff), p_(p), numeric_trace_(nullptr) {
   const char* trace_path = std::getenv("FX2_NUMERIC_TRACE");
-  if (trace_path && trace_path[0]) {
-    numeric_trace_ = new NumericTrace(trace_path);
+  const char* probability_path = std::getenv("FX2_NUMERIC_PROB_TRACE");
+  if ((trace_path && trace_path[0]) ||
+      (probability_path && probability_path[0])) {
+    numeric_trace_ = new NumericTrace(trace_path, probability_path);
   }
 }
 

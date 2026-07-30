@@ -17,7 +17,8 @@ class Mixer {
  public:
   Mixer(const std::valarray<float>& inputs,
       const std::valarray<float>& extra_inputs, const unsigned long long& context,
-      float learning_rate, unsigned int extra_input_size);
+      float learning_rate, unsigned int extra_input_size,
+      const bool* active = nullptr);
   float Mix();
   void Perceive(int bit);
 
@@ -33,6 +34,7 @@ class Mixer {
   emhash6::HashMap<unsigned int, ContextData> context_map_;
   ContextData context_base_;
   ContextData* active_data_;
+  const bool* active_;
 };
 
 #endif

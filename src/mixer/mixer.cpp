@@ -14,10 +14,11 @@ constexpr unsigned int kContextLimit = 10000;
 Mixer::Mixer(const std::valarray<float>& inputs,
     const std::valarray<float>& extra_inputs,
     const unsigned long long& context, float learning_rate,
-    unsigned int extra_input_size) : inputs_(inputs),
+    unsigned int extra_input_size, const bool* active) : inputs_(inputs),
     extra_inputs_vec_(extra_inputs), extra_inputs_size_(extra_input_size),/*extra_inputs_(extra_input_size),*/ p_(0.5),
     learning_rate_(learning_rate), context_(context), /*max_steps_(1),*/ steps_(0),
-    context_base_(inputs.size(), extra_inputs_size_), active_data_(nullptr) {
+    context_base_(inputs.size(), extra_inputs_size_), active_data_(nullptr),
+    active_(active) {
   context_map_.reserve(kContextLimit);
 }
 
@@ -47,6 +48,11 @@ ContextData* Mixer::GetContextData() {
 }
 
 float Mixer::Mix() {
+  if (active_ && !*active_) {
+    active_data_ = nullptr;
+    p_ = 0;
+    return 0;
+  }
   active_data_ = GetContextData();
   float p = 0;
   for (int i = 0; i < inputs_.size(); ++i) {
@@ -65,6 +71,7 @@ float Mixer::Mix() {
 }
 
 void Mixer::Perceive(int bit) {
+  if (!active_data_) return;
 
   float decay=0.2f;
   if ( steps_ < 25000000) {

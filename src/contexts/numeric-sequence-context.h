@@ -51,6 +51,9 @@ class NumericSequenceContext {
   const uint64_t& LinkedContext() const { return linked_context_; }
   const uint64_t& StartCoarseContext() const { return start_coarse_context_; }
   const uint64_t& StartFieldContext() const { return start_field_context_; }
+  const uint64_t& BoundaryMixerContext() const {
+    return boundary_mixer_context_;
+  }
   uint8_t StartWordBucket() const { return start_word_bucket_; }
   uint8_t StartWrtBucket() const { return start_wrt_bucket_; }
   StructuralClass PreviousStructuralClass() const {
@@ -76,6 +79,7 @@ class NumericSequenceContext {
   uint64_t linked_context_ = 0;
   uint64_t start_coarse_context_ = 0;
   uint64_t start_field_context_ = 0;
+  uint64_t boundary_mixer_context_ = 64;
   uint8_t start_word_bucket_ = 0;
   uint8_t start_wrt_bucket_ = 0;
 };

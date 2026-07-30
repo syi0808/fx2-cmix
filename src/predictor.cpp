@@ -35,15 +35,15 @@ unsigned long long Predictor::GetNumModels() {
 }
 
 void Predictor::AddMixer(int layer, const unsigned long long& context,
-    float learning_rate) {
+    float learning_rate, const bool* active) {
   if (layer == 0) {
     mixer_0_.emplace_back(
         layers_[layer].Inputs(), layers_[layer].ExtraInputs(), context,
-      learning_rate, mixer_0_.size());
+      learning_rate, mixer_0_.size(), active);
   } else {
     mixer_1_.emplace_back(
         layers_[layer].Inputs(), layers_[layer].ExtraInputs(), context,
-      learning_rate, mixer_1_.size());
+      learning_rate, mixer_1_.size(), active);
   }
 }
 
@@ -201,6 +201,10 @@ void Predictor::AddMixers() {
   AddMixer(0, manager_.mx16, 0.005);
   AddMixer(0, manager_.mx14, 0.005);
   AddMixer(0, manager_.mx15, 0.005);
+#if NUMERIC_BOUNDARY_MIXER
+  AddMixer(0, manager_.numeric_sequence_.BoundaryMixerContext(), 0.005,
+      &manager_.numeric_sequence_.BoundaryActive());
+#endif
 
   input_size = mixer_0_.size() + auxiliary_size_;
   layers_[1].SetNumModels(input_size);

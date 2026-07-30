@@ -48,6 +48,9 @@
 #ifndef NUMERIC_FIELD_MODEL
 #define NUMERIC_FIELD_MODEL 0
 #endif
+#ifndef NUMERIC_BOUNDARY_MIXER
+#define NUMERIC_BOUNDARY_MIXER 0
+#endif
 
 class Predictor {
  public:
@@ -68,7 +71,7 @@ class Predictor {
  private:
   unsigned long long GetNumModels();
   void AddMixer(int layer, const unsigned long long& context,
-      float learning_rate);
+      float learning_rate, const bool* active = nullptr);
   void AddAuxiliary();
   void AddPPMD();
   void AddBracket();

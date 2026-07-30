@@ -207,6 +207,7 @@ Numeric models are disabled by default. Build-time ablations use these flags:
 ```text
 NUMERIC_BOUNDARY_MODEL
 NUMERIC_BOUNDARY_SEMANTIC
+NUMERIC_BOUNDARY_MIXER
 NUMERIC_LINKED_MODEL
 NUMERIC_LINKED_SHAPE
 NUMERIC_START_MODEL
@@ -223,7 +224,18 @@ INPUT_LIMIT=1048576 \
 
 Set `FX2_NUMERIC_TRACE=trace.json` during compression to record event-level
 final and standalone model loss. Compare traces with
-`tools/analyze_numeric_trace.py`. `FX2_INPUT_LIMIT` limits the copied Predictor
-stream used by the benchmark, and `FX2_KEEP_TEMP=1` retains ordinary temporary
-streams. Set `PRETRAIN=0` on the benchmark script only for quick smoke runs
-that intentionally omit dictionary pretraining.
+`tools/analyze_numeric_trace.py`. `FX2_NUMERIC_PROB_TRACE=trace.prob.bin`
+records boundary-active bit probabilities for offline residual tests:
+
+```bash
+tools/analyze_numeric_trace.py B0.json B2.json \
+  --probability-traces B0.prob.bin B2.prob.bin \
+  --warmup-bytes 200000
+```
+
+The shape audit also reports empirical entropy for the raw terminator byte,
+conditioned on run length, start structure, and linked shape prefix.
+`FX2_INPUT_LIMIT` limits the copied Predictor stream used by the benchmark,
+and `FX2_KEEP_TEMP=1` retains ordinary temporary streams. Set `PRETRAIN=0` on
+the benchmark script only for quick smoke runs that intentionally omit
+dictionary pretraining.
