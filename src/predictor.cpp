@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <cstdlib>
+#include <cmath>
 
 Predictor::Predictor(const std::vector<bool>& vocab) : manager_(),
     sigmoid_(100001), vocab_(vocab) {
@@ -371,6 +372,10 @@ float Predictor::Predict() {
   p = sse_.Predict(p);
   url_residual_used_ = false;
   if (byte_mixer_override >= 0) {
+#if FX2_CONTROL_PROGRAM
+    baseline_probability_ = byte_mixer_override;
+    control_features_ = {};
+#endif
     return byte_mixer_override;
   }
 #if URL_SIDECAR
@@ -380,7 +385,24 @@ float Predictor::Predict() {
   p = url_residual_.Predict(p, url_model_probabilities_,
       url_model_probability_count_, manager_.url_context_.State(), sigmoid_);
 #endif
+#if FX2_CONTROL_PROGRAM
+  baseline_probability_ = p;
+  const float confidence = std::min(15.0f,
+      std::fabs(sigmoid_.Logit(p)) * 2.0f);
+  const float fxcm_probability =
+      Sigmoid::Logistic(layers_[0].Inputs()[fxcm_model_index]);
+  const float byte_probability =
+      Sigmoid::Logistic(layers_[0].Inputs()[byte_mixer_index]);
+  control_features_.confidence = static_cast<uint8_t>(confidence);
+  control_features_.disagreement = static_cast<uint8_t>(std::min(15.0f,
+      std::fabs(fxcm_probability - byte_probability) * 32.0f));
+  control_features_.match_length = static_cast<uint8_t>(std::min<unsigned long long>(
+      15, manager_.longest_match_));
+  control_features_.bit_position = manager_.bpos & 7;
+  return ApplyControlScale(p, SelectControlScale(control_features_), sigmoid_);
+#else
   return p;
+#endif
 }
 
 void Predictor::Perceive(int bit) {

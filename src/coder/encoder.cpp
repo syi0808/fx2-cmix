@@ -10,7 +10,10 @@
 #include <cstdlib>
 #include <map>
 #include <iterator>
+#include <limits>
+#include <sstream>
 #include <string>
+#include <vector>
 
 #ifndef URL_TRACE
 #define URL_TRACE 1
@@ -467,8 +470,131 @@ struct UrlTrace {
   uint64_t current_url_id_ = 0;
 };
 
+#if FX2_EXPERIMENT_TRACE
+struct ExperimentTrace {
+  struct ArticleRange {
+    uint64_t article_id = 0;
+    uint64_t begin = 0;
+    uint64_t end = 0;
+    uint8_t split = 0;
+    uint64_t bits = 0;
+    double ideal_bits = 0;
+  };
+
+  struct ControlBucket {
+    uint64_t count = 0;
+    double bits = 0;
+  };
+
+  ExperimentTrace(const char* path, const char* manifest_path)
+      : path_(path ? path : "") {
+    if (manifest_path && manifest_path[0]) LoadManifest(manifest_path);
+    if (articles_.empty()) {
+      articles_.push_back({0, 0, std::numeric_limits<uint64_t>::max(), 0});
+    }
+  }
+
+  void LoadManifest(const char* path) {
+    std::ifstream input(path);
+    std::string line;
+    std::getline(input, line);
+    while (std::getline(input, line)) {
+      std::istringstream fields(line);
+      uint64_t rank = 0, source_article = 0;
+      ArticleRange article;
+      unsigned int split = 0;
+      if (fields >> rank >> article.article_id >> source_article >>
+          article.begin >> article.end >> split) {
+        article.split = split & 7;
+        articles_.push_back(article);
+      }
+    }
+  }
+
+  static double QuantizedLoss(int bit, float probability) {
+    const unsigned int discrete = 1 + 65534 * probability;
+    return BitLoss(bit, discrete / 65536.0);
+  }
+
+  void AddBit(int bit, unsigned int final_probability, Predictor* predictor) {
+    const uint64_t byte_position = bit_position_ >> 3;
+    while (article_index_ < articles_.size() &&
+        byte_position >= articles_[article_index_].end) {
+      ++article_index_;
+    }
+    if (article_index_ < articles_.size()) {
+      ArticleRange& article = articles_[article_index_];
+      if (byte_position >= article.begin && byte_position < article.end) {
+        ++article.bits;
+        article.ideal_bits +=
+            BitLoss(bit, final_probability / 65536.0);
+        const ControlFeatures& features = predictor->CurrentControlFeatures();
+        for (uint8_t scale = 0; scale < 5; ++scale) {
+          ControlBucket& bucket = control_[article.split][features.confidence]
+              [features.disagreement][scale];
+          ++bucket.count;
+          bucket.bits += QuantizedLoss(
+              bit, predictor->ControlCandidateProbability(scale));
+        }
+      }
+    }
+    ++bit_position_;
+  }
+
+  void Write() {
+    if (written_ || path_.empty()) return;
+    written_ = true;
+    FILE* output = std::fopen(path_.c_str(), "w");
+    if (!output) {
+      std::fprintf(stderr, "\ncan't open experiment trace: %s\n", path_.c_str());
+      return;
+    }
+    std::fprintf(output,
+        "kind\tarticle_id\tsplit\tconfidence\tdisagreement\tscale_class"
+        "\tcount\tideal_bits\n");
+    for (const ArticleRange& article : articles_) {
+      if (!article.bits) continue;
+      std::fprintf(output, "article\t%llu\t%u\t-\t-\t-\t%llu\t%.9f\n",
+          static_cast<unsigned long long>(article.article_id), article.split,
+          static_cast<unsigned long long>(article.bits), article.ideal_bits);
+    }
+    for (size_t split = 0; split < control_.size(); ++split) {
+      for (size_t confidence = 0; confidence < control_[split].size();
+          ++confidence) {
+        for (size_t disagreement = 0;
+            disagreement < control_[split][confidence].size(); ++disagreement) {
+          for (size_t scale = 0;
+              scale < control_[split][confidence][disagreement].size(); ++scale) {
+            const ControlBucket& bucket =
+                control_[split][confidence][disagreement][scale];
+            if (!bucket.count) continue;
+            std::fprintf(output,
+                "control\t-\t%zu\t%zu\t%zu\t%zu\t%llu\t%.9f\n",
+                split, confidence, disagreement, scale,
+                static_cast<unsigned long long>(bucket.count), bucket.bits);
+          }
+        }
+      }
+    }
+    std::fclose(output);
+  }
+
+  std::string path_;
+  std::vector<ArticleRange> articles_;
+  std::array<std::array<std::array<std::array<ControlBucket, 5>, 16>, 16>, 8>
+      control_ = {};
+  uint64_t bit_position_ = 0;
+  size_t article_index_ = 0;
+  bool written_ = false;
+};
+#endif
+
 Encoder::Encoder(std::ofstream* os, Predictor* p) : os_(os), x1_(0),
-    x2_(0xffffffff), p_(p), numeric_trace_(nullptr), url_trace_(nullptr) {
+    x2_(0xffffffff), p_(p), numeric_trace_(nullptr), url_trace_(nullptr)
+#if FX2_EXPERIMENT_TRACE
+    , experiment_trace_(nullptr)
+#endif
+    {
   const char* trace_path = std::getenv("FX2_NUMERIC_TRACE");
   const char* probability_path = std::getenv("FX2_NUMERIC_PROB_TRACE");
   if ((trace_path && trace_path[0]) ||
@@ -481,11 +607,21 @@ Encoder::Encoder(std::ofstream* os, Predictor* p) : os_(os), x1_(0),
     url_trace_ = new UrlTrace(url_trace_path);
   }
 #endif
+#if FX2_EXPERIMENT_TRACE
+  const char* experiment_path = std::getenv("FX2_EXPERIMENT_TRACE_PATH");
+  if (experiment_path && experiment_path[0]) {
+    experiment_trace_ = new ExperimentTrace(experiment_path,
+        std::getenv("FX2_ARTICLE_MANIFEST"));
+  }
+#endif
 }
 
 Encoder::~Encoder() {
   delete numeric_trace_;
   delete url_trace_;
+#if FX2_EXPERIMENT_TRACE
+  delete experiment_trace_;
+#endif
 }
 
 void Encoder::WriteByte(unsigned int byte) {
@@ -505,6 +641,9 @@ void Encoder::Encode(int bit) {
   if (url_trace_) {
     url_trace_->AddBit(bit, p, p_->CurrentUrlState());
   }
+#if FX2_EXPERIMENT_TRACE
+  if (experiment_trace_) experiment_trace_->AddBit(bit, p, p_);
+#endif
   const unsigned int xmid = x1_ + ((x2_ - x1_) >> 16) * p +
       (((x2_ - x1_) & 0xffff) * p >> 16);
   if (bit) {
@@ -533,4 +672,7 @@ void Encoder::Flush() {
   os_->write(data, out_.size());
   if (numeric_trace_) numeric_trace_->Write();
   if (url_trace_) url_trace_->Write();
+#if FX2_EXPERIMENT_TRACE
+  if (experiment_trace_) experiment_trace_->Write();
+#endif
 }

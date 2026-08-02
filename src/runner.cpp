@@ -52,6 +52,7 @@ int Help() {
   printf("    without dictionary: cmix -c [input] [output]\n");
   printf("    no preprocessing:   cmix -n [input] [output]\n");
   printf("    raw predictor input: cmix -r [dictionary] [input] [output]\n");
+  printf("    raw predictor output: cmix -q [dictionary] [input] [output]\n");
   printf("    only preprocessing: cmix -s [dictionary] [input] [output]\n");
   printf("                        cmix -s [input] [output]\n");
   printf("Decompress:\n");
@@ -313,7 +314,7 @@ bool RunCompression(bool enable_preprocess, const std::string& input_path,
 bool RunDecompression(const std::string& input_path,
     const std::string& temp_path, const std::string& output_path,
     FILE* dictionary, unsigned long long* input_bytes,
-    unsigned long long* output_bytes) {
+    unsigned long long* output_bytes, bool raw_predictor_output = false) {
   std::ifstream data_in(input_path, std::ios::in | std::ios::binary);
   if (!data_in.is_open()) return false;
 
@@ -352,6 +353,11 @@ bool RunDecompression(const std::string& input_path,
   data_in.close();
   temp_out.close();
 
+  if (raw_predictor_output) {
+    if (std::rename(temp_path.c_str(), output_path.c_str()) != 0) return false;
+    return true;
+  }
+
   FILE* temp_in = fopen(temp_path.c_str(), "rb");
   if (!temp_in) return false;
   FILE* data_out = fopen(output_path.c_str(), "wb");
@@ -373,7 +379,7 @@ int main(int argc, char** argv) {
        (argv[1][1] != 'c' && argv[1][1] != 'd' &&
         argv[1][1] != 'x' && argv[1][1] != 's' &&
         argv[1][1] != 'n' && argv[1][1] != 'r' &&
-        argv[1][1] != 'e'))) ||
+        argv[1][1] != 'e' && argv[1][1] != 'q'))) ||
       (argc > 1 && argv[1][1] == 'r' && argc != 5)) {
     return Help();
   }
@@ -446,6 +452,11 @@ int main(int argc, char** argv) {
     if (argv[1][1] != 'r') remove(".dict");
     if (!RunCompression(enable_preprocess, input_path, temp_path, output_path,
         dictionary, &input_bytes, &output_bytes, argv[1][1] == 'r')) {
+      return Help();
+    }
+  } else if (argv[1][1] == 'q') {
+    if (!RunDecompression(input_path, temp_path, output_path, dictionary,
+        &input_bytes, &output_bytes, true)) {
       return Help();
     }
   } else if (argv[1][1] == 'e') {

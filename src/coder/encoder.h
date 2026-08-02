@@ -6,8 +6,15 @@
 
 #include "../predictor.h"
 
+#ifndef FX2_EXPERIMENT_TRACE
+#define FX2_EXPERIMENT_TRACE 0
+#endif
+
 struct NumericTrace;
 struct UrlTrace;
+#if FX2_EXPERIMENT_TRACE
+struct ExperimentTrace;
+#endif
 
 class Encoder {
  public:
@@ -26,5 +33,8 @@ class Encoder {
   Predictor* p_;
   NumericTrace* numeric_trace_;
   UrlTrace* url_trace_;
+#if FX2_EXPERIMENT_TRACE
+  ExperimentTrace* experiment_trace_;
+#endif
 };
 #endif

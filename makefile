@@ -1,4 +1,8 @@
+ifeq ($(shell uname -s),Darwin)
+CC = clang++
+else
 CC = clang++-17
+endif
 
 ROOT_DIR:=$(shell dirname $(realpath $(firstword $(MAKEFILE_LIST))))
 
@@ -21,7 +25,11 @@ CPPFLAGS_PART-THAT-CAN-BE-SLOW    := $(CPPFLAGS_PART-THAT-SHOULD-BE-FAST)
 CPPFLAGS_PART-THAT-CAN-BE-SLOW    += -Os -fdata-sections -ffunction-sections
 CPPFLAGS_PART-THAT-SHOULD-BE-FAST += -O3 -fdata-sections -ffunction-sections
 
+ifeq ($(shell uname -s),Darwin)
+LFLAGS := -m64 -Wl,-dead_strip -std=c++17
+else
 LFLAGS := -m64 -Wl,--gc-sections -std=c++17
+endif
 
 
 prof_gen: CPPFLAGS_PART-THAT-CAN-BE-SLOW    += -fprofile-generate=$(ROOT_DIR)/pgo_data

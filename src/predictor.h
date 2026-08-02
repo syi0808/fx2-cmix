@@ -1,6 +1,16 @@
 #ifndef PREDICTOR_H
 #define PREDICTOR_H
 
+#ifndef SEED
+#define SEED 923
+#endif
+#ifndef UPDATE_LIMIT
+#define UPDATE_LIMIT 3000
+#endif
+#ifndef FX2_CONTROL_PROGRAM
+#define FX2_CONTROL_PROGRAM 0
+#endif
+
 #include "mixer/sigmoid.h"
 #include "mixer/mixer-input.h"
 #include "mixer/mixer.h"
@@ -28,6 +38,7 @@
 #include "contexts/interval-hash.h"
 #include "contexts/bit-context.h"
 #include "contexts/combined-context.h"
+#include "control/control-program.h"
 #include "contexts/url-context.h"
 
 #include "ds/SmallVector.h"
@@ -100,6 +111,15 @@ class Predictor {
   const UrlState& CurrentUrlState() const {
     return manager_.url_context_.State();
   }
+#if FX2_CONTROL_PROGRAM
+  const ControlFeatures& CurrentControlFeatures() const {
+    return control_features_;
+  }
+  float BaselineProbability() const { return baseline_probability_; }
+  float ControlCandidateProbability(uint8_t scale_class) const {
+    return ApplyControlScale(baseline_probability_, scale_class, sigmoid_);
+  }
+#endif
 
  private:
   unsigned long long GetNumModels();
@@ -147,6 +167,10 @@ class Predictor {
   size_t url_model_probability_count_ = 0;
   UrlResidual url_residual_;
   bool url_residual_used_ = false;
+#if FX2_CONTROL_PROGRAM
+  ControlFeatures control_features_;
+  float baseline_probability_ = 0.5f;
+#endif
    FXCM fxcm_model_;
 };
 

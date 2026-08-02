@@ -1,6 +1,10 @@
 #ifndef LSTM_LAYER_H
 #define LSTM_LAYER_H
 
+#ifndef UPDATE_LIMIT
+#define UPDATE_LIMIT 3000
+#endif
+
 #include <valarray>
 #include <vector>
 #include <stdlib.h>
@@ -58,4 +62,3 @@ class LstmLayer {
 #include "lstm-layer.hpp"
 
 #endif
-
