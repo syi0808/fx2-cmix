@@ -38,10 +38,27 @@ jobs:
         shell: bash
         env:
           CXX: clang++-17
+          FX2_PAIR_RANK_WARMUP: "1024"
+          FX2_PAIR_RANK_STRIDE: "113"
+          FX2_PAIR_RANK_SAMPLES: "256"
         run: |
           set -euxo pipefail
           chmod +x experiments/byte-candidate-rank/run_pair.sh
           experiments/byte-candidate-rank/run_pair.sh experiments/byte-candidate-rank/out/preprocess.out.cmix.temp
+
+      - name: Measure exact PPMD four-byte ranks and fx2 baseline
+        shell: bash
+        env:
+          CXX: clang++-17
+          FX2_BLOCK_RANK_LENGTH: "4"
+          FX2_BLOCK_RANK_WARMUP: "1024"
+          FX2_BLOCK_RANK_STRIDE: "457"
+          FX2_BLOCK_RANK_SAMPLES: "64"
+          FX2_BLOCK_RANK_NODE_BUDGET: "250000"
+        run: |
+          set -euxo pipefail
+          chmod +x experiments/byte-candidate-rank/run_block.sh
+          experiments/byte-candidate-rank/run_block.sh experiments/byte-candidate-rank/out/preprocess.out.cmix.temp dictionary/english.dic
 
       - name: Upload results
         if: always()
