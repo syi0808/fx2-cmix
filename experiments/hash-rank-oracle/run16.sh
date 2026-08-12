@@ -17,6 +17,11 @@ DICT="${2:-dictionary/english.dic}"
 OUT_DIR="${FX2_ORACLE_OUT_DIR:-experiments/hash-rank-oracle/out16}"
 mkdir -p "$OUT_DIR"
 
+# The oracle requires real fork COW isolation. Production PPMD's MAP_SHARED
+# arena leaks child mutations back into the baseline process, so make the
+# file-backed arena private and keep it mapped for the full experiment.
+python3 experiments/hash-rank-oracle/prepare_private_ppmd.py
+
 make clean
 make fast slow
 
