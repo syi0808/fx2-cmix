@@ -6,6 +6,10 @@ on:
       - experiment/byte-candidate-rank
   workflow_dispatch:
 
+concurrency:
+  group: byte-candidate-rank-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   measure:
     runs-on: ubuntu-24.04
