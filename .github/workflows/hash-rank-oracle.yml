@@ -1,0 +1,43 @@
+name: Hash rank oracle
+
+on:
+  push:
+    branches:
+      - experiment/hash-rank-oracle
+  workflow_dispatch:
+
+jobs:
+  oracle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare compiler
+        shell: bash
+        run: |
+          set -euxo pipefail
+          clang++ --version
+          if ! command -v clang++-17 >/dev/null 2>&1; then
+            sudo ln -sf "$(command -v clang++)" /usr/local/bin/clang++-17
+          fi
+          clang++-17 --version
+
+      - name: Run exact fx2 byte-rank oracle
+        shell: bash
+        env:
+          FX2_ORACLE_WARMUP: "32768"
+          FX2_ORACLE_SAMPLES: "8"
+          FX2_ORACLE_STRIDE: "65536"
+        run: |
+          set -euxo pipefail
+          chmod +x experiments/hash-rank-oracle/run.sh
+          experiments/hash-rank-oracle/run.sh prof_input/input2 dictionary/english.dic | tee experiments/hash-rank-oracle/out/action.log
+
+      - name: Upload oracle results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hash-rank-oracle
+          path: experiments/hash-rank-oracle/out
+          if-no-files-found: warn
