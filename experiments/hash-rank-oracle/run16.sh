@@ -26,12 +26,13 @@ REGULAR_OBJECTS=( *.o )
 "$CXX" -m64 -Wall -std=c++17 -O3 -ffp-model=fast -fno-exceptions \
   -fno-threadsafe-statics -march=native -mtune=native \
   -Wno-unused-variable -Wno-unused-but-set-variable -Wno-format \
-  -c experiments/hash-rank-oracle/hash_rank_oracle16.cpp \
-  -o hash_rank_oracle16.o
+  -c experiments/hash-rank-oracle/hash_rank_oracle16_replay.cpp \
+  -o hash_rank_oracle16_replay.o
 
 ORACLE_OBJECTS=()
 for object in *.o; do
   [[ "$object" == "runner.o" ]] && continue
+  [[ "$object" == "hash_rank_oracle16.o" ]] && continue
   ORACLE_OBJECTS+=("$object")
 done
 "$CXX" "${LINK_FLAGS[@]}" "${ORACLE_OBJECTS[@]}" -o hash-rank-oracle16
