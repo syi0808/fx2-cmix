@@ -19,12 +19,12 @@ jobs:
           set -euxo pipefail
           clang++ --version
 
-      - name: Run exact fx2 16-bit branch-and-bound oracle
+      - name: Run exact fx2 printable-ASCII 16-bit oracle
         shell: bash
         env:
           CXX: clang++
-          FX2_ORACLE16_POSITION: "32768"
-          FX2_ORACLE16_NODE_BUDGET: "50000"
+          FX2_ORACLE16_POSITION: "260000"
+          FX2_ORACLE16_NODE_BUDGET: "20000"
         run: |
           set -euxo pipefail
           chmod +x experiments/hash-rank-oracle/run16.sh
