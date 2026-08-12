@@ -72,6 +72,7 @@ struct DistributionMetrics {
   uint64_t gamma_rank_bits = 0;
   double reciprocal_rank = 0.0;
   std::array<uint64_t, 8> topk = {};
+  std::array<uint64_t, 257> rank_hist = {};
   uint64_t rank_sum = 0;
   uint64_t max_rank = 0;
 
@@ -97,6 +98,7 @@ struct DistributionMetrics {
     }
     const uint64_t rank = earlier + 1;
     ++samples;
+    ++rank_hist[rank];
     rank_sum += rank;
     max_rank = std::max(max_rank, rank);
     log2_rank_bits += std::log2(static_cast<double>(rank));
@@ -112,9 +114,17 @@ struct DistributionMetrics {
 
   void Print(const char* prefix) const {
     const double count = static_cast<double>(samples);
+    double entropy = 0.0;
+    for (size_t rank = 1; rank < rank_hist.size(); ++rank) {
+      if (!rank_hist[rank]) continue;
+      const double probability = static_cast<double>(rank_hist[rank]) / count;
+      entropy -= probability * std::log2(probability);
+    }
+
     std::cout << prefix << "_samples=" << samples << '\n';
     std::cout << prefix << "_mean_nll_bits=" << nll_bits / count << '\n';
     std::cout << prefix << "_mean_log2_rank=" << log2_rank_bits / count << '\n';
+    std::cout << prefix << "_rank_zero_order_entropy_bits=" << entropy << '\n';
     std::cout << prefix << "_mean_gamma_rank_bits="
               << static_cast<double>(gamma_rank_bits) / count << '\n';
     std::cout << prefix << "_mean_rank="
@@ -171,6 +181,7 @@ int main(int argc, char** argv) {
   DistributionMetrics ppmd;
   DistributionMetrics byte_mixer;
   double full_predictor_bits = 0.0;
+  std::vector<double> byte_losses(end, 0.0);
   for (size_t position = 0; position < end; ++position) {
     const uint8_t actual = data[position];
     if (position >= warmup) {
@@ -178,6 +189,7 @@ int main(int argc, char** argv) {
       byte_mixer.Add(predictor.ByteMixerProbabilities(), vocab, actual);
     }
     const double loss = AdvanceByte(&predictor, actual);
+    byte_losses[position] = loss;
     if (position >= warmup) full_predictor_bits += loss;
   }
 
@@ -189,6 +201,15 @@ int main(int argc, char** argv) {
   std::cout << "measured_bytes=" << (end - warmup) << '\n';
   std::cout << "full_predictor_mean_surprisal_bits="
             << full_predictor_bits / samples << '\n';
+
+  static constexpr std::array<size_t, 7> pair_positions = {
+      4096, 8192, 12288, 16384, 20480, 24576, 28672};
+  for (size_t position : pair_positions) {
+    if (position + 1 >= end) continue;
+    std::cout << "full_pair_position_" << position << "_surprisal_bits="
+              << byte_losses[position] + byte_losses[position + 1] << '\n';
+  }
+
   ppmd.Print("ppmd");
   byte_mixer.Print("byte_mixer");
   return 0;
