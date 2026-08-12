@@ -8,7 +8,7 @@ on:
 
 jobs:
   oracle:
-    runs-on: ubuntu-latest
+    runs-on: macos-14
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
@@ -18,20 +18,18 @@ jobs:
         run: |
           set -euxo pipefail
           clang++ --version
-          if ! command -v clang++-17 >/dev/null 2>&1; then
-            sudo ln -sf "$(command -v clang++)" /usr/local/bin/clang++-17
-          fi
-          clang++-17 --version
 
       - name: Run exact fx2 byte-rank oracle
         shell: bash
         env:
+          CXX: clang++
           FX2_ORACLE_WARMUP: "32768"
           FX2_ORACLE_SAMPLES: "8"
           FX2_ORACLE_STRIDE: "65536"
         run: |
           set -euxo pipefail
           chmod +x experiments/hash-rank-oracle/run.sh
+          mkdir -p experiments/hash-rank-oracle/out
           experiments/hash-rank-oracle/run.sh prof_input/input2 dictionary/english.dic | tee experiments/hash-rank-oracle/out/action.log
 
       - name: Upload oracle results
