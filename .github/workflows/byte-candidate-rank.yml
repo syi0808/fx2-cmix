@@ -38,15 +38,15 @@ jobs:
           chmod +x experiments/byte-candidate-rank/run.sh
           experiments/byte-candidate-rank/run.sh prof_input/input dictionary/english.dic
 
-      - name: Measure exact PPMD four-byte ranks and fx2 baseline
+      - name: Probe hard exact PPMD four-byte rank and fx2 baseline
         shell: bash
         env:
           CXX: clang++-17
           FX2_BLOCK_RANK_LENGTH: "4"
-          FX2_BLOCK_RANK_WARMUP: "1024"
-          FX2_BLOCK_RANK_STRIDE: "457"
-          FX2_BLOCK_RANK_SAMPLES: "16"
-          FX2_BLOCK_RANK_FORK_BUDGET: "50000"
+          FX2_BLOCK_RANK_WARMUP: "4680"
+          FX2_BLOCK_RANK_STRIDE: "1"
+          FX2_BLOCK_RANK_SAMPLES: "1"
+          FX2_BLOCK_RANK_FORK_BUDGET: "500000"
         run: |
           set -euxo pipefail
           chmod +x experiments/byte-candidate-rank/run_block.sh
