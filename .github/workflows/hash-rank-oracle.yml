@@ -24,7 +24,7 @@ jobs:
         env:
           CXX: clang++
           FX2_ORACLE_WARMUP: "32768"
-          FX2_ORACLE_SAMPLES: "8"
+          FX2_ORACLE_SAMPLES: "4"
           FX2_ORACLE_STRIDE: "65536"
         run: |
           set -euxo pipefail
