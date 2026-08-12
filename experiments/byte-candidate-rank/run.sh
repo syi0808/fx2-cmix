@@ -10,6 +10,8 @@ DICT="${2:-dictionary/english.dic}"
 OUT_DIR="${FX2_BYTE_RANK_OUT_DIR:-experiments/byte-candidate-rank/out}"
 mkdir -p "$OUT_DIR"
 
+python3 experiments/byte-candidate-rank/prepare_private_ppmd.py
+
 make clean
 make fast slow
 
