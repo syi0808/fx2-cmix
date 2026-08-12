@@ -4,7 +4,14 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT"
 
-CXX="${CXX:-clang++-17}"
+if [[ "$(uname -s)" == "Darwin" ]]; then
+  CXX="${CXX:-clang++}"
+  LINK_FLAGS=( -m64 -Wl,-dead_strip -std=c++17 )
+else
+  CXX="${CXX:-clang++-17}"
+  LINK_FLAGS=( -m64 -Wl,--gc-sections -std=c++17 )
+fi
+
 INPUT="${1:-prof_input/input2}"
 DICT="${2:-dictionary/english.dic}"
 OUT_DIR="${FX2_ORACLE_OUT_DIR:-experiments/hash-rank-oracle/out}"
@@ -15,7 +22,7 @@ make clean
 make fast slow
 
 REGULAR_OBJECTS=( *.o )
-"$CXX" -m64 -Wl,--gc-sections -std=c++17 "${REGULAR_OBJECTS[@]}" -s -o cmix
+"$CXX" "${LINK_FLAGS[@]}" "${REGULAR_OBJECTS[@]}" -s -o cmix
 
 "$CXX" -m64 -Wall -std=c++17 -O3 -ffp-model=fast -fno-exceptions \
   -fno-threadsafe-statics -march=native -mtune=native \
@@ -28,8 +35,7 @@ for object in *.o; do
   [[ "$object" == "runner.o" ]] && continue
   ORACLE_OBJECTS+=("$object")
 done
-"$CXX" -m64 -Wl,--gc-sections -std=c++17 "${ORACLE_OBJECTS[@]}" \
-  -o hash-rank-oracle
+"$CXX" "${LINK_FLAGS[@]}" "${ORACLE_OBJECTS[@]}" -o hash-rank-oracle
 
 # Produce the same dictionary-preprocessed stream that RunCompression feeds to
 # Predictor, but stop before arithmetic coding.
@@ -44,12 +50,21 @@ if [[ ! -s "$PREDICTOR_INPUT" ]]; then
   exit 2
 fi
 
-/usr/bin/time -v env \
-  FX2_ORACLE_WARMUP="${FX2_ORACLE_WARMUP:-32768}" \
-  FX2_ORACLE_SAMPLES="${FX2_ORACLE_SAMPLES:-8}" \
-  FX2_ORACLE_STRIDE="${FX2_ORACLE_STRIDE:-65536}" \
-  ./hash-rank-oracle "$PREDICTOR_INPUT" "$DICT" \
-  >"$OUT_DIR/results.csv" 2>"$OUT_DIR/oracle.stderr.log"
+ORACLE_ENV=(
+  "FX2_ORACLE_WARMUP=${FX2_ORACLE_WARMUP:-32768}"
+  "FX2_ORACLE_SAMPLES=${FX2_ORACLE_SAMPLES:-8}"
+  "FX2_ORACLE_STRIDE=${FX2_ORACLE_STRIDE:-65536}"
+)
+
+if [[ "$(uname -s)" == "Darwin" ]]; then
+  env "${ORACLE_ENV[@]}" \
+    ./hash-rank-oracle "$PREDICTOR_INPUT" "$DICT" \
+    >"$OUT_DIR/results.csv" 2>"$OUT_DIR/oracle.stderr.log"
+else
+  /usr/bin/time -v env "${ORACLE_ENV[@]}" \
+    ./hash-rank-oracle "$PREDICTOR_INPUT" "$DICT" \
+    >"$OUT_DIR/results.csv" 2>"$OUT_DIR/oracle.stderr.log"
+fi
 
 cat "$OUT_DIR/results.csv"
 echo "--- oracle stderr ---"
