@@ -1,0 +1,83 @@
+name: Global hash factorization gate
+
+on:
+  push:
+    branches:
+      - experiment/global-hash-factorization
+  workflow_dispatch:
+
+concurrency:
+  group: global-hash-factorization-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  factorization:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare compiler
+        shell: bash
+        run: |
+          set -euxo pipefail
+          clang++ --version
+          if ! command -v clang++-17 >/dev/null 2>&1; then
+            sudo ln -sf "$(command -v clang++)" /usr/local/bin/clang++-17
+          fi
+          clang++-17 --version
+
+      - name: Build objects and predictor fixture
+        shell: bash
+        env:
+          CXX: clang++-17
+          FX2_BYTE_RANK_WARMUP: "256"
+          FX2_BYTE_RANK_LIMIT: "1"
+        run: |
+          set -euxo pipefail
+          chmod +x experiments/byte-candidate-rank/run.sh
+          experiments/byte-candidate-rank/run.sh prof_input/input dictionary/english.dic
+
+      - name: Measure first two-byte halves
+        shell: bash
+        env:
+          CXX: clang++-17
+          FX2_PAIR_RANK_WARMUP: "1024"
+          FX2_PAIR_RANK_STRIDE: "457"
+          FX2_PAIR_RANK_SAMPLES: "9"
+        run: |
+          set -euxo pipefail
+          chmod +x experiments/byte-candidate-rank/run_pair.sh
+          experiments/byte-candidate-rank/run_pair.sh experiments/byte-candidate-rank/out/preprocess.out.cmix.temp
+          cp experiments/byte-candidate-rank/out/pair-results.csv experiments/byte-candidate-rank/out/factor-pair-first.csv
+
+      - name: Measure second two-byte halves
+        shell: bash
+        env:
+          CXX: clang++-17
+          FX2_PAIR_RANK_WARMUP: "1026"
+          FX2_PAIR_RANK_STRIDE: "457"
+          FX2_PAIR_RANK_SAMPLES: "9"
+        run: |
+          set -euxo pipefail
+          experiments/byte-candidate-rank/run_pair.sh experiments/byte-candidate-rank/out/preprocess.out.cmix.temp
+          cp experiments/byte-candidate-rank/out/pair-results.csv experiments/byte-candidate-rank/out/factor-pair-second.csv
+
+      - name: Compare pair-product rank with exact joint rank
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python3 experiments/byte-candidate-rank/factorization_analyze.py \
+            experiments/byte-candidate-rank/out/factor-pair-first.csv \
+            experiments/byte-candidate-rank/out/factor-pair-second.csv \
+            experiments/byte-candidate-rank/out/factorization.csv \
+            | tee experiments/byte-candidate-rank/out/factorization-summary.txt
+          cat experiments/byte-candidate-rank/out/factorization.csv
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: global-hash-factorization
+          path: experiments/byte-candidate-rank/out
+          if-no-files-found: warn
