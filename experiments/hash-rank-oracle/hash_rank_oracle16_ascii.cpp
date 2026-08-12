@@ -1,7 +1,6 @@
 #include "../../src/predictor.h"
 #include "../../src/preprocess/preprocessor.h"
 
-#include <algorithm>
 #include <cerrno>
 #include <cmath>
 #include <cstdint>
@@ -17,6 +16,8 @@
 #include <unistd.h>
 
 namespace {
+
+constexpr uint64_t kPrintableCandidateSpace = 95ULL * 95ULL;
 
 unsigned int Discretize(float p) { return 1 + 65534 * p; }
 
@@ -65,40 +66,38 @@ bool ReadAll(int fd, void* data, size_t size) {
   return true;
 }
 
-struct PrefixEval {
+struct SequenceEval {
   double loss = 0.0;
-  unsigned int next_probability = 0;
   bool valid = true;
   int crash_signal = 0;
 };
 
-// Always replay from an untouched baseline Predictor. No DFS state is reused.
-// Some arbitrary counterfactual continuations violate assumptions inside the
-// production Predictor and crash even though the actual input path is valid.
-// Those paths are undefined for this oracle; report them to the caller so the
-// entire experiment can prune the corresponding subtree instead of aborting.
-PrefixEval EvaluatePrefix(Predictor* baseline, uint16_t prefix, int depth) {
+// Score one complete 16-bit continuation in a forked snapshot. Evaluating only
+// complete candidates avoids the extra next-bit Predict() that made the older
+// prefix-DFS oracle crash on otherwise irrelevant intermediate states.
+SequenceEval EvaluateSequence(Predictor* baseline, uint16_t value) {
   int fds[2];
   if (pipe(fds) != 0) { std::perror("pipe"); std::exit(2); }
   const pid_t pid = fork();
   if (pid < 0) { std::perror("fork"); std::exit(2); }
   if (pid == 0) {
     close(fds[0]);
-    PrefixEval out;
-    for (int shift = depth - 1; shift >= 0; --shift) {
-      const int bit = (prefix >> shift) & 1;
+    SequenceEval out;
+    for (int shift = 15; shift >= 0; --shift) {
+      const int bit = (value >> shift) & 1;
       const unsigned int p = Discretize(baseline->Predict());
       out.loss += BitLoss(bit, p);
-      baseline->Perceive(bit);
+      // The final bit does not need to be committed because no later
+      // probability contributes to this finite-sequence likelihood.
+      if (shift != 0) baseline->Perceive(bit);
     }
-    if (depth < 16) out.next_probability = Discretize(baseline->Predict());
     const bool ok = WriteAll(fds[1], &out, sizeof(out));
     close(fds[1]);
     _exit(ok ? 0 : 3);
   }
 
   close(fds[1]);
-  PrefixEval out;
+  SequenceEval out;
   const bool ok = ReadAll(fds[0], &out, sizeof(out));
   close(fds[0]);
   int status = 0;
@@ -112,40 +111,9 @@ PrefixEval EvaluatePrefix(Predictor* baseline, uint16_t prefix, int depth) {
     out.crash_signal = WTERMSIG(status);
     return out;
   }
-
-  std::fprintf(stderr, "prefix failed depth=%d status=%d prefix=%u\n",
-      depth, status, static_cast<unsigned int>(prefix));
+  std::fprintf(stderr, "candidate failed status=%d value=%u\n",
+      status, static_cast<unsigned int>(value));
   std::exit(3);
-}
-
-bool AsciiBytePrefixAllowed(int depth, unsigned int prefix) {
-  if (depth == 0) return true;
-  const int shift = 8 - depth;
-  for (unsigned int value = 32; value <= 126; ++value) {
-    if ((value >> shift) == prefix) return true;
-  }
-  return false;
-}
-
-bool Ascii16PrefixAllowed(uint16_t prefix, int depth) {
-  if (depth <= 8) return AsciiBytePrefixAllowed(depth, prefix);
-  const int second_depth = depth - 8;
-  const unsigned int first = prefix >> second_depth;
-  if (first < 32 || first > 126) return false;
-  const unsigned int mask = (1u << second_depth) - 1;
-  return AsciiBytePrefixAllowed(second_depth, prefix & mask);
-}
-
-uint64_t PrintableLeavesUnderPrefix(uint16_t prefix, int depth) {
-  uint64_t count = 0;
-  const int shift = 16 - depth;
-  for (unsigned int first = 32; first <= 126; ++first) {
-    for (unsigned int second = 32; second <= 126; ++second) {
-      const uint32_t value = (first << 8) | second;
-      if (depth == 0 || (value >> shift) == prefix) ++count;
-    }
-  }
-  return count;
 }
 
 uint64_t Mix64(uint64_t x) {
@@ -176,60 +144,14 @@ unsigned int MinHashBits(uint64_t collision) {
   return 33;
 }
 
-struct Result {
-  uint64_t earlier = 0;
-  uint64_t nodes = 0;
-  uint64_t collision = 0;
-  uint64_t crash_prefixes = 0;
-  uint64_t crash_candidates_pruned = 0;
-  int min_crash_depth = 17;
-  bool actual_seen = false;
-  bool overflow = false;
-};
+unsigned int FloorLog2(uint64_t value) {
+  unsigned int result = 0;
+  while (value >>= 1) ++result;
+  return result;
+}
 
-void Explore(Predictor* baseline, uint16_t prefix, int depth,
-    double target_loss, uint16_t actual, uint64_t target_hash,
-    uint64_t budget, Result* result) {
-  if (result->overflow) return;
-  if (++result->nodes > budget) { result->overflow = true; return; }
-  if (!Ascii16PrefixAllowed(prefix, depth)) return;
-
-  const PrefixEval eval = EvaluatePrefix(baseline, prefix, depth);
-  if (!eval.valid) {
-    ++result->crash_prefixes;
-    result->crash_candidates_pruned += PrintableLeavesUnderPrefix(prefix, depth);
-    result->min_crash_depth = std::min(result->min_crash_depth, depth);
-    if (result->crash_prefixes <= 8) {
-      std::fprintf(stderr,
-          "pruning crashing prefix depth=%d signal=%d prefix=%u leaves=%llu\n",
-          depth, eval.crash_signal, static_cast<unsigned int>(prefix),
-          static_cast<unsigned long long>(PrintableLeavesUnderPrefix(prefix, depth)));
-    }
-    return;
-  }
-
-  if (depth == 16) {
-    if (prefix == actual) { result->actual_seen = true; return; }
-    const bool earlier = eval.loss < target_loss - 1e-12 ||
-        (std::fabs(eval.loss - target_loss) <= 1e-12 && prefix < actual);
-    if (earlier) {
-      ++result->earlier;
-      result->collision |= CollisionMask(prefix, target_hash);
-    }
-    return;
-  }
-
-  if (eval.loss >= target_loss) return;
-  for (int bit = 0; bit <= 1; ++bit) {
-    const uint16_t child = static_cast<uint16_t>((prefix << 1) | bit);
-    if (!Ascii16PrefixAllowed(child, depth + 1)) continue;
-    const double lower = eval.loss + BitLoss(bit, eval.next_probability);
-    if (depth + 1 < 16 && lower >= target_loss) continue;
-    if (depth + 1 == 16 && lower > target_loss + 1e-12) continue;
-    Explore(baseline, child, depth + 1, target_loss, actual, target_hash,
-        budget, result);
-    if (result->overflow) return;
-  }
+unsigned int EliasGammaBits(uint64_t positive_value) {
+  return 2 * FloorLog2(positive_value) + 1;
 }
 
 std::vector<uint8_t> ReadFile(const char* path) {
@@ -269,8 +191,10 @@ int main(int argc, char** argv) {
     std::fclose(dictionary);
   }
 
-  const size_t position = std::min(EnvSize("FX2_ORACLE16_POSITION", 260000), data.size() - 2);
-  const uint64_t budget = EnvSize("FX2_ORACLE16_NODE_BUDGET", 20000);
+  const size_t position = std::min(
+      EnvSize("FX2_ORACLE16_POSITION", 260000), data.size() - 2);
+  const uint64_t budget = EnvSize(
+      "FX2_ORACLE16_NODE_BUDGET", kPrintableCandidateSpace);
   for (size_t i = 0; i < position; ++i) AdvanceByte(&predictor, data[i]);
 
   const uint8_t a = data[position];
@@ -282,35 +206,73 @@ int main(int argc, char** argv) {
     return 4;
   }
   const uint16_t actual = (static_cast<uint16_t>(a) << 8) | b;
-  const PrefixEval actual_eval = EvaluatePrefix(&predictor, actual, 16);
+  const SequenceEval actual_eval = EvaluateSequence(&predictor, actual);
   if (!actual_eval.valid) {
     std::cerr << "actual block itself crashes Predictor\n";
     return 7;
   }
   const double target_loss = actual_eval.loss;
+  const uint64_t target_hash = Fingerprint(actual);
 
-  Result result;
-  Explore(&predictor, 0, 0, target_loss, actual, Fingerprint(actual), budget, &result);
-  if (result.overflow) { std::cerr << "node budget exhausted\n"; return 5; }
-  if (!result.actual_seen) { std::cerr << "actual leaf not reached\n"; return 6; }
+  uint64_t evaluated = 0;
+  uint64_t stable_candidates = 0;
+  uint64_t crash_candidates = 0;
+  uint64_t earlier = 0;
+  uint64_t collision = 0;
+  for (unsigned int first = 32; first <= 126; ++first) {
+    for (unsigned int second = 32; second <= 126; ++second) {
+      if (++evaluated > budget) {
+        std::cerr << "candidate budget exhausted at " << evaluated << '\n';
+        return 5;
+      }
+      const uint16_t candidate = static_cast<uint16_t>((first << 8) | second);
+      if (candidate == actual) {
+        ++stable_candidates;
+        continue;
+      }
+      const SequenceEval eval = EvaluateSequence(&predictor, candidate);
+      if (!eval.valid) {
+        ++crash_candidates;
+        if (crash_candidates <= 8) {
+          std::fprintf(stderr, "skipping crashing candidate signal=%d value=%u\n",
+              eval.crash_signal, static_cast<unsigned int>(candidate));
+        }
+        continue;
+      }
+      ++stable_candidates;
+      const bool is_earlier = eval.loss < target_loss - 1e-12 ||
+          (std::fabs(eval.loss - target_loss) <= 1e-12 && candidate < actual);
+      if (is_earlier) {
+        ++earlier;
+        collision |= CollisionMask(candidate, target_hash);
+      }
+    }
+  }
 
-  const uint64_t rank = result.earlier + 1;
+  const uint64_t rank = earlier + 1;
   const double rank_bits = std::log2(static_cast<double>(rank));
-  const unsigned int hash_bits = MinHashBits(result.collision);
-  const uint64_t stable_candidates = 9025 - result.crash_candidates_pruned;
-  const int min_crash_depth = result.crash_prefixes ? result.min_crash_depth : -1;
+  const unsigned int hash_bits = MinHashBits(collision);
+  const unsigned int rank_gamma_bits = EliasGammaBits(rank);
+  const unsigned int hash_gamma_bits =
+      hash_bits + EliasGammaBits(static_cast<uint64_t>(hash_bits) + 1);
+  const unsigned int hash_fixed6_bits = hash_bits + 6;
 
-  std::cout << "position,actual0,actual1,candidate_space,stable_candidate_space,surprisal_bits,rank,log2_rank,min_first_match_hash_bits,rank_oracle_gain_bits,hash_payload_gain_bits,search_nodes,crash_prefixes,crash_candidates_pruned,min_crash_depth\n";
+  std::cout << "position,actual0,actual1,candidate_space,stable_candidate_space,surprisal_bits,rank,log2_rank,rank_gamma_bits,min_first_match_hash_bits,hash_gamma_framed_bits,hash_fixed6_framed_bits,rank_oracle_gain_bits,hash_payload_gain_bits,rank_gamma_gain_bits,hash_gamma_gain_bits,hash_fixed6_gain_bits,evaluated_candidates,crash_candidates\n";
   std::cout << position << ',' << static_cast<unsigned int>(a) << ','
-            << static_cast<unsigned int>(b) << ",9025," << stable_candidates << ','
+            << static_cast<unsigned int>(b) << ',' << kPrintableCandidateSpace
+            << ',' << stable_candidates << ','
             << std::fixed << std::setprecision(6) << target_loss << ','
-            << rank << ',' << rank_bits << ',' << hash_bits << ','
-            << (target_loss - rank_bits) << ',' << (target_loss - hash_bits)
-            << ',' << result.nodes << ',' << result.crash_prefixes << ','
-            << result.crash_candidates_pruned << ',' << min_crash_depth << '\n';
-  std::cerr << "stable printable-ASCII oracle complete; earlier=" << result.earlier
-            << " nodes=" << result.nodes
-            << " crash_prefixes=" << result.crash_prefixes
-            << " pruned_candidates=" << result.crash_candidates_pruned << '\n';
+            << rank << ',' << rank_bits << ',' << rank_gamma_bits << ','
+            << hash_bits << ',' << hash_gamma_bits << ',' << hash_fixed6_bits
+            << ',' << (target_loss - rank_bits)
+            << ',' << (target_loss - hash_bits)
+            << ',' << (target_loss - rank_gamma_bits)
+            << ',' << (target_loss - hash_gamma_bits)
+            << ',' << (target_loss - hash_fixed6_bits)
+            << ',' << evaluated << ',' << crash_candidates << '\n';
+  std::cerr << "complete printable-ASCII oracle; earlier=" << earlier
+            << " evaluated=" << evaluated
+            << " stable=" << stable_candidates
+            << " crashes=" << crash_candidates << '\n';
   return 0;
 }
