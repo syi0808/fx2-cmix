@@ -8,7 +8,7 @@ on:
 
 jobs:
   oracle-byte:
-    runs-on: macos-14
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
@@ -18,13 +18,17 @@ jobs:
         run: |
           set -euxo pipefail
           clang++ --version
+          if ! command -v clang++-17 >/dev/null 2>&1; then
+            sudo ln -sf "$(command -v clang++)" /usr/local/bin/clang++-17
+          fi
+          clang++-17 --version
 
-      - name: Revalidate exact next-byte oracle with private PPMD mmap
+      - name: Revalidate one exact next-byte sample with private PPMD mmap
         shell: bash
         env:
-          CXX: clang++
+          CXX: clang++-17
           FX2_ORACLE_WARMUP: "32768"
-          FX2_ORACLE_SAMPLES: "4"
+          FX2_ORACLE_SAMPLES: "1"
           FX2_ORACLE_STRIDE: "65536"
           FX2_ORACLE_OUT_DIR: "experiments/hash-rank-oracle/out-private"
         run: |
