@@ -1,0 +1,31 @@
+name: Vocabulary forced-bit measurement
+
+on:
+  push:
+    branches:
+      - experiment/vocab-forced-bits
+  workflow_dispatch:
+
+jobs:
+  measure:
+    runs-on: macos-14
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Measure exact forced-bit headroom
+        shell: bash
+        env:
+          CXX: clang++
+        run: |
+          set -euxo pipefail
+          chmod +x experiments/vocab-forced-bits/run.sh
+          experiments/vocab-forced-bits/run.sh prof_input/input dictionary/english.dic
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vocab-forced-bits
+          path: experiments/vocab-forced-bits/out
+          if-no-files-found: warn
