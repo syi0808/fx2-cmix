@@ -15,6 +15,8 @@ if [[ ! -s "$PREDICTOR_INPUT" ]]; then
   exit 2
 fi
 
+python3 experiments/byte-candidate-rank/prepare_fork_budget.py
+
 "$CXX" -m64 -Wall -std=c++17 -O3 -ffp-model=fast -fno-exceptions \
   -fno-threadsafe-statics -march=native -mtune=native \
   -Wno-unused-variable -Wno-unused-but-set-variable -Wno-format \
@@ -46,10 +48,12 @@ fi
 "$CXX" -m64 "${LINK_GC[@]}" -std=c++17 full-block-baseline.o \
   "${BASELINE_OBJECTS[@]}" -o full-block-baseline
 
-./ppmd-block-rank "$PREDICTOR_INPUT" \
-  >"$OUT_DIR/block-rank.csv" 2>"$OUT_DIR/block-rank.stderr.log"
+# Always persist the exact full-fx2 baseline even when a difficult PPMD block
+# exceeds the experimental search budget.
 ./full-block-baseline "$PREDICTOR_INPUT" "$DICT" \
   >"$OUT_DIR/block-baseline.csv" 2>"$OUT_DIR/block-baseline.stderr.log"
+./ppmd-block-rank "$PREDICTOR_INPUT" \
+  >"$OUT_DIR/block-rank.csv" 2>"$OUT_DIR/block-rank.stderr.log"
 
-cat "$OUT_DIR/block-rank.csv"
 cat "$OUT_DIR/block-baseline.csv"
+cat "$OUT_DIR/block-rank.csv"
