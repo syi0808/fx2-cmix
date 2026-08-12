@@ -11,6 +11,7 @@
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <limits>
 #include <numeric>
 #include <string>
 #include <vector>
@@ -30,13 +31,18 @@ double BitLoss(int bit, unsigned int probability) {
   return -std::log2(bit ? p : 1.0 - p);
 }
 
-double ScoreByte(Predictor* predictor, uint8_t value) {
+// For probability ranking of a finite next-byte candidate we do not need to
+// commit the final bit: P(byte|state) is fully determined by the eight Predict
+// calls before that final state transition. Keeping commit_final=false also
+// avoids exercising model update paths that are irrelevant to this one-byte
+// oracle after the candidate has already been completely scored.
+double ScoreByte(Predictor* predictor, uint8_t value, bool commit_final = true) {
   double loss = 0.0;
   for (int shift = 7; shift >= 0; --shift) {
     const int bit = (value >> shift) & 1;
     const unsigned int probability = Discretize(predictor->Predict());
     loss += BitLoss(bit, probability);
-    predictor->Perceive(bit);
+    if (shift != 0 || commit_final) predictor->Perceive(bit);
   }
   return loss;
 }
@@ -85,7 +91,7 @@ double ScoreByteForked(Predictor* predictor, uint8_t value) {
 
   if (pid == 0) {
     close(pipefd[0]);
-    const double loss = ScoreByte(predictor, value);
+    const double loss = ScoreByte(predictor, value, false);
     const bool ok = WriteAll(pipefd[1], &loss, sizeof(loss));
     close(pipefd[1]);
     _exit(ok ? 0 : 3);
@@ -97,9 +103,18 @@ double ScoreByteForked(Predictor* predictor, uint8_t value) {
   close(pipefd[0]);
 
   int status = 0;
-  if (waitpid(pid, &status, 0) != pid || !read_ok ||
-      !WIFEXITED(status) || WEXITSTATUS(status) != 0) {
-    std::fprintf(stderr, "candidate child failed for value=%u\n", value);
+  const pid_t waited = waitpid(pid, &status, 0);
+  if (waited != pid || !read_ok || !WIFEXITED(status) ||
+      WEXITSTATUS(status) != 0) {
+    if (WIFSIGNALED(status)) {
+      std::fprintf(stderr,
+          "candidate child failed for value=%u signal=%d read_ok=%d\n",
+          value, WTERMSIG(status), read_ok ? 1 : 0);
+    } else {
+      std::fprintf(stderr,
+          "candidate child failed for value=%u status=%d read_ok=%d\n",
+          value, status, read_ok ? 1 : 0);
+    }
     std::exit(3);
   }
   return loss;
@@ -171,21 +186,34 @@ struct Sample {
   unsigned int fingerprint_bits = 0;
 };
 
-Sample Evaluate(Predictor* predictor, size_t position, uint8_t actual) {
-  std::vector<double> losses(256);
+Sample Evaluate(Predictor* predictor, size_t position, uint8_t actual,
+    const std::vector<bool>& vocab) {
+  std::vector<double> losses(
+      256, std::numeric_limits<double>::infinity());
+  std::vector<int> order;
+  order.reserve(256);
+
+  // The fx2 archive already transmits the Predictor-stream vocabulary bitmap.
+  // Bytes absent from that shared vocabulary cannot be the true next byte and
+  // therefore should not consume brute-force/fingerprint candidate space.
   for (int candidate = 0; candidate < 256; ++candidate) {
+    if (!vocab[candidate]) continue;
     losses[candidate] = ScoreByteForked(
         predictor, static_cast<uint8_t>(candidate));
+    order.push_back(candidate);
   }
 
-  std::vector<int> order(256);
-  std::iota(order.begin(), order.end(), 0);
   std::stable_sort(order.begin(), order.end(), [&](int lhs, int rhs) {
     if (losses[lhs] != losses[rhs]) return losses[lhs] < losses[rhs];
     return lhs < rhs;
   });
 
   const auto found = std::find(order.begin(), order.end(), actual);
+  if (found == order.end()) {
+    std::fprintf(stderr, "actual byte %u absent from shared vocabulary\n",
+        actual);
+    std::exit(4);
+  }
   const size_t index = static_cast<size_t>(found - order.begin());
   Sample sample;
   sample.position = position;
@@ -221,6 +249,8 @@ int main(int argc, char** argv) {
   } else {
     for (uint8_t value : data) vocab[value] = true;
   }
+  const size_t vocab_size = static_cast<size_t>(
+      std::count(vocab.begin(), vocab.end(), true));
 
   Predictor predictor(vocab);
   FILE* dictionary = nullptr;
@@ -249,6 +279,7 @@ int main(int argc, char** argv) {
   if (targets.empty()) targets.push_back(warmup);
 
   std::cerr << "predictor_input_bytes=" << data.size()
+            << " vocab_size=" << vocab_size
             << " warmup=" << warmup
             << " samples=" << targets.size()
             << " stride=" << stride << "\n";
@@ -259,7 +290,8 @@ int main(int argc, char** argv) {
     if (target_index < targets.size() && position == targets[target_index]) {
       std::cerr << "evaluating position " << position << " ("
                 << (target_index + 1) << "/" << targets.size() << ")\n";
-      samples.push_back(Evaluate(&predictor, position, data[position]));
+      samples.push_back(
+          Evaluate(&predictor, position, data[position], vocab));
       ++target_index;
     }
 
