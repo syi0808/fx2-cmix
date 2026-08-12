@@ -11,8 +11,6 @@
 #include <fstream>
 #include <iomanip>
 #include <iostream>
-#include <limits>
-#include <numeric>
 #include <vector>
 
 #include <sys/types.h>
@@ -62,6 +60,12 @@ std::vector<uint8_t> ReadFile(const char* path) {
   std::vector<uint8_t> data(size);
   if (size) input.read(reinterpret_cast<char*>(data.data()), size);
   return data;
+}
+
+size_t EnvSize(const char* name, size_t fallback) {
+  const char* value = std::getenv(name);
+  if (!value || !value[0]) return fallback;
+  return static_cast<size_t>(std::strtoull(value, nullptr, 10));
 }
 
 unsigned int FloorLog2(uint64_t value) {
@@ -132,7 +136,6 @@ ConditionalDistribution ConditionalAfterFirstByte(PPMD::PPMD* model,
     result.valid = 1;
     const bool ok = WriteAll(pipefd[1], &result, sizeof(result));
     close(pipefd[1]);
-    // Do not run PPMD::~PPMD() in the child: the parent still owns ppm.temp.
     _exit(ok ? 0 : 3);
   }
 
@@ -159,7 +162,22 @@ struct Candidate {
   double loss = 0.0;
 };
 
-void EvaluatePair(PPMD::PPMD* model, unsigned int* byte_context,
+struct PairResult {
+  size_t position = 0;
+  uint8_t actual_first = 0;
+  uint8_t actual_second = 0;
+  size_t candidate_space = 0;
+  double ppmd_nll = 0.0;
+  uint64_t rank = 0;
+  double log2_rank = 0.0;
+  unsigned int gamma_bits = 0;
+  unsigned int hash_bits = 0;
+  unsigned int hash_gamma_bits = 0;
+  uint64_t forks = 0;
+  long long elapsed_ms = 0;
+};
+
+PairResult EvaluatePair(PPMD::PPMD* model, unsigned int* byte_context,
     const std::vector<bool>& vocab, const std::vector<uint8_t>& data,
     size_t position) {
   const auto started = std::chrono::steady_clock::now();
@@ -174,12 +192,11 @@ void EvaluatePair(PPMD::PPMD* model, unsigned int* byte_context,
     first_probability[value] = first_distribution[value];
   }
 
-  std::vector<Candidate> candidates;
   const size_t vocab_size = static_cast<size_t>(
       std::count(vocab.begin(), vocab.end(), true));
+  std::vector<Candidate> candidates;
   candidates.reserve(vocab_size * vocab_size);
   uint64_t forks = 0;
-  uint64_t failed_first_bytes = 0;
 
   for (unsigned int first = 0; first < 256; ++first) {
     if (!vocab[first]) continue;
@@ -187,26 +204,20 @@ void EvaluatePair(PPMD::PPMD* model, unsigned int* byte_context,
     const ConditionalDistribution conditional = ConditionalAfterFirstByte(
         model, byte_context, static_cast<uint8_t>(first));
     if (!conditional.valid) {
-      ++failed_first_bytes;
-      std::fprintf(stderr, "conditional PPMD child failed first=%u signal=%d\n",
-          first, conditional.signal);
-      continue;
+      std::fprintf(stderr,
+          "conditional PPMD child failed first=%u signal=%d position=%zu\n",
+          first, conditional.signal, position);
+      std::exit(3);
     }
     const double p1 = std::max(1e-30, first_probability[first]);
     for (unsigned int second = 0; second < 256; ++second) {
       if (!vocab[second]) continue;
       const double p2 = std::max(
           1e-30, static_cast<double>(conditional.probabilities[second]));
-      Candidate candidate;
-      candidate.value = static_cast<uint16_t>((first << 8) | second);
-      candidate.loss = -std::log2(p1) - std::log2(p2);
-      candidates.push_back(candidate);
+      candidates.push_back({
+          static_cast<uint16_t>((first << 8) | second),
+          -std::log2(p1) - std::log2(p2)});
     }
-  }
-
-  if (failed_first_bytes) {
-    std::cerr << "pair oracle incomplete because conditional branches failed\n";
-    std::exit(3);
   }
 
   std::stable_sort(candidates.begin(), candidates.end(),
@@ -230,21 +241,23 @@ void EvaluatePair(PPMD::PPMD* model, unsigned int* byte_context,
   for (const Candidate& candidate : candidates) order.push_back(candidate.value);
   const unsigned int hash_bits = MinimumFirstMatchFingerprintBits(
       order, actual_index, actual);
-  const unsigned int rank_gamma_bits = EliasGammaBits(rank);
-  const unsigned int hash_gamma_bits =
+
+  PairResult result;
+  result.position = position;
+  result.actual_first = actual_first;
+  result.actual_second = actual_second;
+  result.candidate_space = candidates.size();
+  result.ppmd_nll = found->loss;
+  result.rank = rank;
+  result.log2_rank = rank_bits;
+  result.gamma_bits = EliasGammaBits(rank);
+  result.hash_bits = hash_bits;
+  result.hash_gamma_bits =
       hash_bits + EliasGammaBits(static_cast<uint64_t>(hash_bits) + 1);
-
-  const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+  result.forks = forks;
+  result.elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
       std::chrono::steady_clock::now() - started).count();
-
-  std::cout << position << ','
-            << static_cast<unsigned int>(actual_first) << ','
-            << static_cast<unsigned int>(actual_second) << ','
-            << candidates.size() << ','
-            << std::fixed << std::setprecision(9) << found->loss << ','
-            << rank << ',' << rank_bits << ',' << rank_bits / 2.0 << ','
-            << rank_gamma_bits << ',' << hash_bits << ',' << hash_gamma_bits
-            << ',' << forks << ',' << elapsed << '\n';
+  return result;
 }
 
 }  // namespace
@@ -256,10 +269,7 @@ int main(int argc, char** argv) {
   }
 
   const std::vector<uint8_t> data = ReadFile(argv[1]);
-  if (data.size() < 28674) {
-    std::cerr << "predictor input too short\n";
-    return 2;
-  }
+  if (data.size() < 4) return 2;
 
   std::vector<bool> vocab(256, false);
   if (data.size() < 10000) {
@@ -267,23 +277,100 @@ int main(int argc, char** argv) {
   } else {
     for (uint8_t value : data) vocab[value] = true;
   }
+  const size_t vocab_size = static_cast<size_t>(
+      std::count(vocab.begin(), vocab.end(), true));
+
+  const size_t warmup = EnvSize("FX2_PAIR_RANK_WARMUP", 1024);
+  const size_t stride = std::max<size_t>(1, EnvSize("FX2_PAIR_RANK_STRIDE", 113));
+  const size_t requested = EnvSize("FX2_PAIR_RANK_SAMPLES", 256);
+  std::vector<size_t> targets;
+  targets.reserve(requested);
+  for (size_t sample = 0; sample < requested; ++sample) {
+    const size_t position = warmup + sample * stride;
+    if (position + 1 >= data.size()) break;
+    targets.push_back(position);
+  }
+  if (targets.empty()) return 2;
 
   unsigned int byte_context = 0;
   PPMD::PPMD model(25, 14000, byte_context, vocab);
-  static constexpr std::array<size_t, 7> targets = {
-      4096, 8192, 12288, 16384, 20480, 24576, 28672};
 
   std::cout << "position,actual0,actual1,candidate_space,ppmd_pair_nll_bits,rank,log2_rank,log2_rank_per_byte,rank_gamma_bits,min_first_match_hash_bits,hash_gamma_framed_bits,conditional_forks,elapsed_ms\n";
+
+  std::vector<uint64_t> rank_hist(vocab_size * vocab_size + 1, 0);
+  uint64_t sample_count = 0;
+  uint64_t top1 = 0, top2 = 0, top4 = 0, top8 = 0, top16 = 0;
+  double total_nll = 0.0;
+  double total_log2_rank = 0.0;
+  uint64_t total_gamma = 0;
+  uint64_t total_hash = 0;
+  uint64_t total_hash_gamma = 0;
+  uint64_t total_forks = 0;
+  uint64_t total_elapsed_ms = 0;
 
   size_t target_index = 0;
   for (size_t position = 0;
       position + 1 < data.size() && target_index < targets.size(); ++position) {
     if (position == targets[target_index]) {
-      EvaluatePair(&model, &byte_context, vocab, data, position);
+      const PairResult result = EvaluatePair(
+          &model, &byte_context, vocab, data, position);
+      ++sample_count;
+      ++rank_hist[result.rank];
+      top1 += result.rank <= 1;
+      top2 += result.rank <= 2;
+      top4 += result.rank <= 4;
+      top8 += result.rank <= 8;
+      top16 += result.rank <= 16;
+      total_nll += result.ppmd_nll;
+      total_log2_rank += result.log2_rank;
+      total_gamma += result.gamma_bits;
+      total_hash += result.hash_bits;
+      total_hash_gamma += result.hash_gamma_bits;
+      total_forks += result.forks;
+      total_elapsed_ms += result.elapsed_ms;
+
+      std::cout << result.position << ','
+                << static_cast<unsigned int>(result.actual_first) << ','
+                << static_cast<unsigned int>(result.actual_second) << ','
+                << result.candidate_space << ','
+                << std::fixed << std::setprecision(9) << result.ppmd_nll << ','
+                << result.rank << ',' << result.log2_rank << ','
+                << result.log2_rank / 2.0 << ',' << result.gamma_bits << ','
+                << result.hash_bits << ',' << result.hash_gamma_bits << ','
+                << result.forks << ',' << result.elapsed_ms << '\n';
       ++target_index;
     }
     byte_context = data[position];
     model.ByteUpdate();
   }
+
+  double rank_entropy = 0.0;
+  for (size_t rank = 1; rank < rank_hist.size(); ++rank) {
+    if (!rank_hist[rank]) continue;
+    const double probability = static_cast<double>(rank_hist[rank]) / sample_count;
+    rank_entropy -= probability * std::log2(probability);
+  }
+
+  const double count = static_cast<double>(sample_count);
+  std::cout << "SUMMARY"
+            << ",samples=" << sample_count
+            << ",vocab_size=" << vocab_size
+            << ",candidate_space=" << vocab_size * vocab_size
+            << ",mean_ppmd_pair_nll_bits=" << total_nll / count
+            << ",mean_log2_rank_bits=" << total_log2_rank / count
+            << ",mean_log2_rank_per_byte=" << total_log2_rank / count / 2.0
+            << ",rank_zero_order_entropy_bits=" << rank_entropy
+            << ",rank_zero_order_entropy_per_byte=" << rank_entropy / 2.0
+            << ",mean_gamma_rank_bits=" << static_cast<double>(total_gamma) / count
+            << ",mean_hash_prefix_bits=" << static_cast<double>(total_hash) / count
+            << ",mean_hash_gamma_bits=" << static_cast<double>(total_hash_gamma) / count
+            << ",top1_rate=" << static_cast<double>(top1) / count
+            << ",top2_rate=" << static_cast<double>(top2) / count
+            << ",top4_rate=" << static_cast<double>(top4) / count
+            << ",top8_rate=" << static_cast<double>(top8) / count
+            << ",top16_rate=" << static_cast<double>(top16) / count
+            << ",mean_conditional_forks=" << static_cast<double>(total_forks) / count
+            << ",mean_elapsed_ms=" << static_cast<double>(total_elapsed_ms) / count
+            << '\n';
   return 0;
 }
