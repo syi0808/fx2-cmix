@@ -8,6 +8,10 @@ on:
 
 jobs:
   oracle16:
+    strategy:
+      fail-fast: false
+      matrix:
+        position: [33822, 34548, 36850, 39901]
     runs-on: macos-14
     timeout-minutes: 60
     steps:
@@ -23,18 +27,19 @@ jobs:
         shell: bash
         env:
           CXX: clang++
-          FX2_ORACLE16_POSITION: "260000"
+          FX2_ORACLE16_POSITION: "${{ matrix.position }}"
           FX2_ORACLE16_NODE_BUDGET: "20000"
+          FX2_ORACLE_OUT_DIR: "experiments/hash-rank-oracle/out16-${{ matrix.position }}"
         run: |
           set -euxo pipefail
           chmod +x experiments/hash-rank-oracle/run16.sh
-          mkdir -p experiments/hash-rank-oracle/out16
-          experiments/hash-rank-oracle/run16.sh prof_input/input2 dictionary/english.dic | tee experiments/hash-rank-oracle/out16/action.log
+          mkdir -p "$FX2_ORACLE_OUT_DIR"
+          experiments/hash-rank-oracle/run16.sh prof_input/input2 dictionary/english.dic | tee "$FX2_ORACLE_OUT_DIR/action.log"
 
       - name: Upload oracle results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: hash-rank-oracle16
-          path: experiments/hash-rank-oracle/out16
+          name: hash-rank-oracle16-${{ matrix.position }}
+          path: experiments/hash-rank-oracle/out16-${{ matrix.position }}
           if-no-files-found: warn
