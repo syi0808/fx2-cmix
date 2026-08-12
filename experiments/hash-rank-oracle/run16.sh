@@ -26,13 +26,14 @@ REGULAR_OBJECTS=( *.o )
 "$CXX" -m64 -Wall -std=c++17 -O3 -ffp-model=fast -fno-exceptions \
   -fno-threadsafe-statics -march=native -mtune=native \
   -Wno-unused-variable -Wno-unused-but-set-variable -Wno-format \
-  -c experiments/hash-rank-oracle/hash_rank_oracle16_replay.cpp \
-  -o hash_rank_oracle16_replay.o
+  -c experiments/hash-rank-oracle/hash_rank_oracle16_ascii.cpp \
+  -o hash_rank_oracle16_ascii.o
 
 ORACLE_OBJECTS=()
 for object in *.o; do
   [[ "$object" == "runner.o" ]] && continue
   [[ "$object" == "hash_rank_oracle16.o" ]] && continue
+  [[ "$object" == "hash_rank_oracle16_replay.o" ]] && continue
   ORACLE_OBJECTS+=("$object")
 done
 "$CXX" "${LINK_FLAGS[@]}" "${ORACLE_OBJECTS[@]}" -o hash-rank-oracle16
@@ -49,8 +50,8 @@ if [[ ! -s "$PREDICTOR_INPUT" ]]; then
 fi
 
 env \
-  FX2_ORACLE16_POSITION="${FX2_ORACLE16_POSITION:-32768}" \
-  FX2_ORACLE16_NODE_BUDGET="${FX2_ORACLE16_NODE_BUDGET:-50000}" \
+  FX2_ORACLE16_POSITION="${FX2_ORACLE16_POSITION:-260000}" \
+  FX2_ORACLE16_NODE_BUDGET="${FX2_ORACLE16_NODE_BUDGET:-20000}" \
   ./hash-rank-oracle16 "$PREDICTOR_INPUT" "$DICT" \
   >"$OUT_DIR/results16.csv" 2>"$OUT_DIR/oracle16.stderr.log"
 
