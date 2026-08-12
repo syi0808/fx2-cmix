@@ -34,6 +34,15 @@ jobs:
           chmod +x experiments/byte-candidate-rank/run.sh
           experiments/byte-candidate-rank/run.sh prof_input/input dictionary/english.dic
 
+      - name: Measure exact PPMD two-byte ranks
+        shell: bash
+        env:
+          CXX: clang++-17
+        run: |
+          set -euxo pipefail
+          chmod +x experiments/byte-candidate-rank/run_pair.sh
+          experiments/byte-candidate-rank/run_pair.sh experiments/byte-candidate-rank/out/preprocess.out.cmix.temp
+
       - name: Upload results
         if: always()
         uses: actions/upload-artifact@v4
