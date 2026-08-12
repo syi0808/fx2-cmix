@@ -1,6 +1,7 @@
 #include "../../src/predictor.h"
 #include "../../src/preprocess/preprocessor.h"
 
+#include <algorithm>
 #include <cerrno>
 #include <cmath>
 #include <cstdint>
@@ -67,9 +68,15 @@ bool ReadAll(int fd, void* data, size_t size) {
 struct PrefixEval {
   double loss = 0.0;
   unsigned int next_probability = 0;
+  bool valid = true;
+  int crash_signal = 0;
 };
 
 // Always replay from an untouched baseline Predictor. No DFS state is reused.
+// Some arbitrary counterfactual continuations violate assumptions inside the
+// production Predictor and crash even though the actual input path is valid.
+// Those paths are undefined for this oracle; report them to the caller so the
+// entire experiment can prune the corresponding subtree instead of aborting.
 PrefixEval EvaluatePrefix(Predictor* baseline, uint16_t prefix, int depth) {
   int fds[2];
   if (pipe(fds) != 0) { std::perror("pipe"); std::exit(2); }
@@ -95,18 +102,20 @@ PrefixEval EvaluatePrefix(Predictor* baseline, uint16_t prefix, int depth) {
   const bool ok = ReadAll(fds[0], &out, sizeof(out));
   close(fds[0]);
   int status = 0;
-  waitpid(pid, &status, 0);
-  if (!ok || !WIFEXITED(status) || WEXITSTATUS(status) != 0) {
-    if (WIFSIGNALED(status)) {
-      std::fprintf(stderr, "prefix crash depth=%d signal=%d prefix=%u\n",
-          depth, WTERMSIG(status), static_cast<unsigned int>(prefix));
-    } else {
-      std::fprintf(stderr, "prefix failed depth=%d status=%d prefix=%u\n",
-          depth, status, static_cast<unsigned int>(prefix));
-    }
-    std::exit(3);
+  if (waitpid(pid, &status, 0) != pid) {
+    std::perror("waitpid");
+    std::exit(2);
   }
-  return out;
+  if (ok && WIFEXITED(status) && WEXITSTATUS(status) == 0) return out;
+  if (WIFSIGNALED(status)) {
+    out.valid = false;
+    out.crash_signal = WTERMSIG(status);
+    return out;
+  }
+
+  std::fprintf(stderr, "prefix failed depth=%d status=%d prefix=%u\n",
+      depth, status, static_cast<unsigned int>(prefix));
+  std::exit(3);
 }
 
 bool AsciiBytePrefixAllowed(int depth, unsigned int prefix) {
@@ -125,6 +134,18 @@ bool Ascii16PrefixAllowed(uint16_t prefix, int depth) {
   if (first < 32 || first > 126) return false;
   const unsigned int mask = (1u << second_depth) - 1;
   return AsciiBytePrefixAllowed(second_depth, prefix & mask);
+}
+
+uint64_t PrintableLeavesUnderPrefix(uint16_t prefix, int depth) {
+  uint64_t count = 0;
+  const int shift = 16 - depth;
+  for (unsigned int first = 32; first <= 126; ++first) {
+    for (unsigned int second = 32; second <= 126; ++second) {
+      const uint32_t value = (first << 8) | second;
+      if (depth == 0 || (value >> shift) == prefix) ++count;
+    }
+  }
+  return count;
 }
 
 uint64_t Mix64(uint64_t x) {
@@ -159,6 +180,9 @@ struct Result {
   uint64_t earlier = 0;
   uint64_t nodes = 0;
   uint64_t collision = 0;
+  uint64_t crash_prefixes = 0;
+  uint64_t crash_candidates_pruned = 0;
+  int min_crash_depth = 17;
   bool actual_seen = false;
   bool overflow = false;
 };
@@ -171,6 +195,19 @@ void Explore(Predictor* baseline, uint16_t prefix, int depth,
   if (!Ascii16PrefixAllowed(prefix, depth)) return;
 
   const PrefixEval eval = EvaluatePrefix(baseline, prefix, depth);
+  if (!eval.valid) {
+    ++result->crash_prefixes;
+    result->crash_candidates_pruned += PrintableLeavesUnderPrefix(prefix, depth);
+    result->min_crash_depth = std::min(result->min_crash_depth, depth);
+    if (result->crash_prefixes <= 8) {
+      std::fprintf(stderr,
+          "pruning crashing prefix depth=%d signal=%d prefix=%u leaves=%llu\n",
+          depth, eval.crash_signal, static_cast<unsigned int>(prefix),
+          static_cast<unsigned long long>(PrintableLeavesUnderPrefix(prefix, depth)));
+    }
+    return;
+  }
+
   if (depth == 16) {
     if (prefix == actual) { result->actual_seen = true; return; }
     const bool earlier = eval.loss < target_loss - 1e-12 ||
@@ -245,7 +282,12 @@ int main(int argc, char** argv) {
     return 4;
   }
   const uint16_t actual = (static_cast<uint16_t>(a) << 8) | b;
-  const double target_loss = EvaluatePrefix(&predictor, actual, 16).loss;
+  const PrefixEval actual_eval = EvaluatePrefix(&predictor, actual, 16);
+  if (!actual_eval.valid) {
+    std::cerr << "actual block itself crashes Predictor\n";
+    return 7;
+  }
+  const double target_loss = actual_eval.loss;
 
   Result result;
   Explore(&predictor, 0, 0, target_loss, actual, Fingerprint(actual), budget, &result);
@@ -255,15 +297,20 @@ int main(int argc, char** argv) {
   const uint64_t rank = result.earlier + 1;
   const double rank_bits = std::log2(static_cast<double>(rank));
   const unsigned int hash_bits = MinHashBits(result.collision);
+  const uint64_t stable_candidates = 9025 - result.crash_candidates_pruned;
+  const int min_crash_depth = result.crash_prefixes ? result.min_crash_depth : -1;
 
-  std::cout << "position,actual0,actual1,candidate_space,surprisal_bits,rank,log2_rank,min_first_match_hash_bits,rank_oracle_gain_bits,hash_payload_gain_bits,search_nodes\n";
+  std::cout << "position,actual0,actual1,candidate_space,stable_candidate_space,surprisal_bits,rank,log2_rank,min_first_match_hash_bits,rank_oracle_gain_bits,hash_payload_gain_bits,search_nodes,crash_prefixes,crash_candidates_pruned,min_crash_depth\n";
   std::cout << position << ',' << static_cast<unsigned int>(a) << ','
-            << static_cast<unsigned int>(b) << ",9025,"
+            << static_cast<unsigned int>(b) << ",9025," << stable_candidates << ','
             << std::fixed << std::setprecision(6) << target_loss << ','
             << rank << ',' << rank_bits << ',' << hash_bits << ','
             << (target_loss - rank_bits) << ',' << (target_loss - hash_bits)
-            << ',' << result.nodes << '\n';
-  std::cerr << "exact printable-ASCII oracle complete; earlier=" << result.earlier
-            << " nodes=" << result.nodes << '\n';
+            << ',' << result.nodes << ',' << result.crash_prefixes << ','
+            << result.crash_candidates_pruned << ',' << min_crash_depth << '\n';
+  std::cerr << "stable printable-ASCII oracle complete; earlier=" << result.earlier
+            << " nodes=" << result.nodes
+            << " crash_prefixes=" << result.crash_prefixes
+            << " pruned_candidates=" << result.crash_candidates_pruned << '\n';
   return 0;
 }
