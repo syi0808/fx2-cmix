@@ -10,7 +10,6 @@
 #include <fstream>
 #include <iomanip>
 #include <iostream>
-#include <numeric>
 #include <vector>
 
 namespace {
@@ -202,12 +201,24 @@ int main(int argc, char** argv) {
   std::cout << "full_predictor_mean_surprisal_bits="
             << full_predictor_bits / samples << '\n';
 
-  static constexpr std::array<size_t, 7> pair_positions = {
-      4096, 8192, 12288, 16384, 20480, 24576, 28672};
-  for (size_t position : pair_positions) {
-    if (position + 1 >= end) continue;
-    std::cout << "full_pair_position_" << position << "_surprisal_bits="
-              << byte_losses[position] + byte_losses[position + 1] << '\n';
+  const size_t pair_warmup = EnvSize("FX2_PAIR_RANK_WARMUP", 1024);
+  const size_t pair_stride = std::max<size_t>(
+      1, EnvSize("FX2_PAIR_RANK_STRIDE", 113));
+  const size_t pair_requested = EnvSize("FX2_PAIR_RANK_SAMPLES", 256);
+  uint64_t pair_samples = 0;
+  double pair_bits = 0.0;
+  for (size_t sample = 0; sample < pair_requested; ++sample) {
+    const size_t position = pair_warmup + sample * pair_stride;
+    if (position + 1 >= end) break;
+    pair_bits += byte_losses[position] + byte_losses[position + 1];
+    ++pair_samples;
+  }
+  if (pair_samples) {
+    std::cout << "full_pair_samples=" << pair_samples << '\n';
+    std::cout << "full_pair_mean_surprisal_bits="
+              << pair_bits / static_cast<double>(pair_samples) << '\n';
+    std::cout << "full_pair_mean_surprisal_per_byte="
+              << pair_bits / static_cast<double>(pair_samples) / 2.0 << '\n';
   }
 
   ppmd.Print("ppmd");
