@@ -17,7 +17,13 @@ DICT="${2:-dictionary/english.dic}"
 OUT_DIR="${FX2_ORACLE_OUT_DIR:-experiments/hash-rank-oracle/out}"
 mkdir -p "$OUT_DIR"
 
-# Build the production predictor and the oracle from exactly the same objects.
+# Production PPMD uses a MAP_SHARED file-backed 14 GiB arena. fork() would not
+# isolate counterfactual candidates, so patch the CI workspace to MAP_PRIVATE
+# before compiling the oracle objects.
+python3 experiments/hash-rank-oracle/prepare_private_ppmd.py
+
+# Build the production predictor and the oracle from exactly the same objects,
+# except for the oracle-only private PPMD mmap semantics above.
 make clean
 make fast slow
 
