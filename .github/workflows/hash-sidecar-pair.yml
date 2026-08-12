@@ -1,0 +1,63 @@
+name: Hash sidecar pair hybrid
+
+on:
+  push:
+    branches:
+      - experiment/hash-sidecar-pair
+  workflow_dispatch:
+
+concurrency:
+  group: hash-sidecar-pair-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  measure:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare compiler
+        shell: bash
+        run: |
+          set -euxo pipefail
+          clang++ --version
+          if ! command -v clang++-17 >/dev/null 2>&1; then
+            sudo ln -sf "$(command -v clang++)" /usr/local/bin/clang++-17
+          fi
+          clang++-17 --version
+
+      - name: Build objects and predictor fixture
+        shell: bash
+        env:
+          CXX: clang++-17
+          FX2_BYTE_RANK_WARMUP: "256"
+          FX2_BYTE_RANK_LIMIT: "1"
+        run: |
+          set -euxo pipefail
+          chmod +x experiments/byte-candidate-rank/run.sh
+          experiments/byte-candidate-rank/run.sh prof_input/input dictionary/english.dic
+
+      - name: Measure pair hash witness and exact fx2 cost
+        shell: bash
+        env:
+          CXX: clang++-17
+          FX2_PAIR_RANK_WARMUP: "1024"
+          FX2_PAIR_RANK_STRIDE: "113"
+          FX2_PAIR_RANK_SAMPLES: "256"
+          FX2_BLOCK_RANK_LENGTH: "2"
+          FX2_BLOCK_RANK_WARMUP: "1024"
+          FX2_BLOCK_RANK_STRIDE: "113"
+          FX2_BLOCK_RANK_SAMPLES: "256"
+        run: |
+          set -euxo pipefail
+          chmod +x experiments/byte-candidate-rank/run_pair_hybrid.sh
+          experiments/byte-candidate-rank/run_pair_hybrid.sh experiments/byte-candidate-rank/out/preprocess.out.cmix.temp dictionary/english.dic
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hash-sidecar-pair
+          path: experiments/byte-candidate-rank/out
+          if-no-files-found: warn
