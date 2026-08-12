@@ -111,6 +111,13 @@ class Predictor {
   const UrlState& CurrentUrlState() const {
     return manager_.url_context_.State();
   }
+  const std::valarray<float>& PpmdByteProbabilities() const {
+    return byte_model_->BytePredict();
+  }
+  const std::valarray<float>& ByteMixerProbabilities() const {
+    return byte_mixer_->BytePredict();
+  }
+  const std::vector<bool>& Vocabulary() const { return vocab_; }
 #if FX2_CONTROL_PROGRAM
   const ControlFeatures& CurrentControlFeatures() const {
     return control_features_;
