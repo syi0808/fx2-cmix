@@ -7,13 +7,9 @@ on:
   workflow_dispatch:
 
 jobs:
-  oracle16:
-    strategy:
-      fail-fast: false
-      matrix:
-        position: [33822, 34548, 36850, 39901]
+  oracle-byte:
     runs-on: macos-14
-    timeout-minutes: 60
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
@@ -23,23 +19,24 @@ jobs:
           set -euxo pipefail
           clang++ --version
 
-      - name: Run exact fx2 printable-ASCII 16-bit oracle
+      - name: Revalidate exact next-byte oracle with private PPMD mmap
         shell: bash
         env:
           CXX: clang++
-          FX2_ORACLE16_POSITION: "${{ matrix.position }}"
-          FX2_ORACLE16_NODE_BUDGET: "20000"
-          FX2_ORACLE_OUT_DIR: "experiments/hash-rank-oracle/out16-${{ matrix.position }}"
+          FX2_ORACLE_WARMUP: "32768"
+          FX2_ORACLE_SAMPLES: "4"
+          FX2_ORACLE_STRIDE: "65536"
+          FX2_ORACLE_OUT_DIR: "experiments/hash-rank-oracle/out-private"
         run: |
           set -euxo pipefail
-          chmod +x experiments/hash-rank-oracle/run16.sh
+          chmod +x experiments/hash-rank-oracle/run.sh
           mkdir -p "$FX2_ORACLE_OUT_DIR"
-          experiments/hash-rank-oracle/run16.sh prof_input/input2 dictionary/english.dic | tee "$FX2_ORACLE_OUT_DIR/action.log"
+          experiments/hash-rank-oracle/run.sh prof_input/input2 dictionary/english.dic | tee "$FX2_ORACLE_OUT_DIR/action.log"
 
       - name: Upload oracle results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: hash-rank-oracle16-${{ matrix.position }}
-          path: experiments/hash-rank-oracle/out16-${{ matrix.position }}
+          name: hash-rank-oracle-private
+          path: experiments/hash-rank-oracle/out-private
           if-no-files-found: warn
