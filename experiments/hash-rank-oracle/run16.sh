@@ -14,12 +14,10 @@ fi
 
 INPUT="${1:-prof_input/input2}"
 DICT="${2:-dictionary/english.dic}"
-OUT_DIR="${FX2_ORACLE_OUT_DIR:-experiments/hash-rank-oracle/out16}"
+OUT_DIR="${FX2_ORACLE_OUT_DIR:-experiments/hash-rank-oracle/out16-private}"
 mkdir -p "$OUT_DIR"
 
-# The oracle requires real fork COW isolation. Production PPMD's MAP_SHARED
-# arena leaks child mutations back into the baseline process, so make the
-# file-backed arena private and keep it mapped for the full experiment.
+# Exact counterfactual replay needs child PPMD writes to stay private.
 python3 experiments/hash-rank-oracle/prepare_private_ppmd.py
 
 make clean
@@ -31,14 +29,15 @@ REGULAR_OBJECTS=( *.o )
 "$CXX" -m64 -Wall -std=c++17 -O3 -ffp-model=fast -fno-exceptions \
   -fno-threadsafe-statics -march=native -mtune=native \
   -Wno-unused-variable -Wno-unused-but-set-variable -Wno-format \
-  -c experiments/hash-rank-oracle/hash_rank_oracle16_ascii.cpp \
-  -o hash_rank_oracle16_ascii.o
+  -Wno-unneeded-internal-declaration \
+  -c experiments/hash-rank-oracle/hash_rank_oracle16_replay.cpp \
+  -o hash_rank_oracle16_replay.o
 
 ORACLE_OBJECTS=()
 for object in *.o; do
   [[ "$object" == "runner.o" ]] && continue
+  [[ "$object" == "hash_rank_oracle16_ascii.o" ]] && continue
   [[ "$object" == "hash_rank_oracle16.o" ]] && continue
-  [[ "$object" == "hash_rank_oracle16_replay.o" ]] && continue
   ORACLE_OBJECTS+=("$object")
 done
 "$CXX" "${LINK_FLAGS[@]}" "${ORACLE_OBJECTS[@]}" -o hash-rank-oracle16
@@ -55,8 +54,8 @@ if [[ ! -s "$PREDICTOR_INPUT" ]]; then
 fi
 
 env \
-  FX2_ORACLE16_POSITION="${FX2_ORACLE16_POSITION:-260000}" \
-  FX2_ORACLE16_NODE_BUDGET="${FX2_ORACLE16_NODE_BUDGET:-20000}" \
+  FX2_ORACLE16_POSITION="${FX2_ORACLE16_POSITION:-33822}" \
+  FX2_ORACLE16_NODE_BUDGET="${FX2_ORACLE16_NODE_BUDGET:-50000}" \
   ./hash-rank-oracle16 "$PREDICTOR_INPUT" "$DICT" \
   >"$OUT_DIR/results16.csv" 2>"$OUT_DIR/oracle16.stderr.log"
 
