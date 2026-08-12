@@ -160,6 +160,8 @@ struct SearchResult {
   uint64_t earlier = 0;
   uint64_t nodes = 0;
   uint64_t collision_mask = 0;
+  double actual_leaf_loss = 0.0;
+  uint8_t actual_seen = 0;
   uint8_t overflow = 0;
 };
 
@@ -167,6 +169,10 @@ void Merge(SearchResult* dst, const SearchResult& src) {
   dst->earlier += src.earlier;
   dst->nodes += src.nodes;
   dst->collision_mask |= src.collision_mask;
+  if (src.actual_seen) {
+    dst->actual_seen = 1;
+    dst->actual_leaf_loss = src.actual_leaf_loss;
+  }
   dst->overflow = dst->overflow || src.overflow;
 }
 
@@ -287,8 +293,6 @@ SearchResult ExploreEarlier(
     if (!PrefixAllowed(vocab, next_byte_depth, next_byte_prefix)) continue;
 
     const double next_loss = loss + BitLoss(bit, probability);
-    // Every later bit has strictly positive quantized loss, so a nonterminal
-    // prefix that already reaches target_loss cannot produce an earlier leaf.
     if (depth < 15 && next_loss >= target_loss) continue;
     if (depth == 15 && next_loss > target_loss + 1e-12) continue;
 
@@ -304,6 +308,16 @@ SearchResult ExploreEarlier(
     for (int i = 0; i < child_count; ++i) {
       ++result.nodes;
       const Child& child = children[i];
+
+      // The target leaf is the reference point for rank and must never count
+      // as an earlier candidate, even if process-order floating noise makes its
+      // recomputed loss differ by a few ulps from target_loss.
+      if (child.value == actual) {
+        result.actual_seen = 1;
+        result.actual_leaf_loss = child.loss;
+        continue;
+      }
+
       const bool lower_loss = child.loss < target_loss - 1e-12;
       const bool tied_before =
           std::fabs(child.loss - target_loss) <= 1e-12 &&
@@ -322,10 +336,6 @@ SearchResult ExploreEarlier(
 
   if (child_count == 0) return result;
 
-  // Explore the first viable branch in a child process. The current process
-  // stays at the exact post-Predict state and can then consume the second bit,
-  // giving us a rollback-free depth-first traversal with at most one active
-  // sibling per level.
   if (child_count == 2) {
     const uint64_t child_budget = node_budget - result.nodes;
     SearchResult first = ExploreChildForked(
@@ -427,10 +437,19 @@ int main(int argc, char** argv) {
       &predictor, vocab, 0, 0, 0, 0, 0.0, actual_loss,
       actual, actual_hash, node_budget);
 
+  if (!search.actual_seen) {
+    std::cerr << "actual leaf was not reached under target threshold\n";
+    return 6;
+  }
+
   const uint64_t rank = search.earlier + 1;
   const double rank_bits = std::log2(static_cast<double>(rank));
   const unsigned int hash_bits =
       MinimumFingerprintBits(search.collision_mask);
+
+  std::cerr << "actual_leaf_loss=" << std::setprecision(12)
+            << search.actual_leaf_loss
+            << " diff=" << (search.actual_leaf_loss - actual_loss) << "\n";
 
   std::cout << "position,actual0,actual1,surprisal_bits,rank,log2_rank,min_first_match_hash_bits,rank_oracle_gain_bits,hash_payload_gain_bits,search_nodes,overflow\n";
   std::cout << position << ','
